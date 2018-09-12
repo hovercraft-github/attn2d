@@ -18,21 +18,21 @@ tensorboardX
 
 #### IWSLT'14 pre-processing:
 ```
-cd data
+cd scripts
 ./prepare-iwslt14.sh
 cd ..
-python preprocess.py -d iwslt14
+python preprocess.py -d iwslt
 ```
 
 #### Training:
 ```
 mkdir -p save events
-python train.py -c config/l24.yaml
+python train.py -c config/iwslt_l24.yaml
 ```
 
 #### Generation & evaluation
 ```
-python generate.py -c config/l24.yaml
+python generate.py -c config/iwslt_l24.yaml
 
 ```
 
