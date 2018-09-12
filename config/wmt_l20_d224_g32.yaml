@@ -1,0 +1,54 @@
+modelname:  wmt_l20_d224_g32
+
+model : pervasive-parallel
+default_config : config/default.yaml
+multi_gpus : 1 
+eval_bleu : 1
+
+network :
+  type: densenet
+  num_layers : 20
+  growth_rate : 32
+  kernel : 3
+  conv_dropout : .1
+  bias : 0
+  weigth_norm : 0
+  init_weights: 0
+  norm : batch
+  use_st : 0
+  half_inputs : 0
+
+encoder:
+  input_dim : 224
+
+decoder:
+  input_dim : 224
+  tie_target_weights : 1
+
+data:
+  src : en
+  trg : de
+  dir : data/wmt_en_de
+  batch_size: 32
+  max_src_length : 70
+  max_trg_length : 70
+
+
+track: 
+  batch_size : 2
+  checkpoint : 5000
+  max_length_a : 0
+  max_length_b : 100
+  max_samples : 3300
+
+optim: 
+  LR:
+      base : 0.001
+      decay_start : 10000
+      decay_every: 50000
+      decay_rate : 0.8
+      patience : 3
+      schedule: step-iter
+      criterion : loss
+  grad_clip : .1
+

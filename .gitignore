@@ -1,0 +1,10 @@
+save
+events
+data
+scripts/mosesdecoder
+scripts/orig
+**/__pycache__
+*.py[cod]
+*.h5 
+*.infos
+run.sh
