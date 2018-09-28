@@ -18,21 +18,32 @@ class textDataLoader(object):
         self.logger.info('Loading h5 file: %s' % params['h5'])
         self.logger.info('...Vocab size is %d ' % self.vocab_size)
         self.h5_file = h5py.File(params['h5'])
-        
-        self.max_indices = {
-            'train': len(self.h5_file["labels_train"]),
-            'val': len(self.h5_file["labels_val"]),
-            'test': len(self.h5_file["labels_test"])
-            }
-        self.logger.info('...Train:  %d | Dev: %d | Test: %d',
-                         self.max_indices['train'],
-                         self.max_indices['val'],
-                         self.max_indices['test'])
+        raw = params.get('raw', False)
+        print('Raw:', raw)
+        if not raw:
+            self.max_indices = {
+                'train': len(self.h5_file["labels_train"]),
+                'val': len(self.h5_file["labels_val"]),
+                'test': len(self.h5_file["labels_test"])
+                }
+            self.logger.info('...Train:  %d | Dev: %d | Test: %d',
+                             self.max_indices['train'],
+                             self.max_indices['val'],
+                             self.max_indices['test'])
+            self.iterators = {'train': 0, 'val': 0, 'test': 0}
+        else:
+            print('Missing the usual splits')
+            print('h5 keys:', list(self.h5_file))
+            self.max_indices = {
+                'full': len(self.h5_file["labels_full"]),
+                }
+            self.logger.info('...Full:  %d',
+                             self.max_indices['full'])
+            self.iterators = {'full': 0}
 
         self.batch_size = params['batch_size']
         self.seq_length = params['max_length']
         self.logger.warning('...Reading sequences up to %d', self.seq_length)
-        self.iterators = {'train': 0, 'val': 0, 'test': 0}
         word_to_ix = {w: ix for ix, w in self.ix_to_word.items()}
         self.pad = word_to_ix['<PAD>']
         self.unk = word_to_ix['<UNK>']
@@ -65,7 +76,6 @@ class textDataLoader(object):
             ri_next = ri + 1
             if ri_next >= max_index:
                 ri_next = 0
-                print('Wrapped source corpus')
                 wrapped = True
             self.iterators[split] = ri_next
             label_batch[i] = self.h5_file[pointer][ri, :self.seq_length]
@@ -101,7 +111,6 @@ class textDataLoader(object):
             ri_next = ri + 1
             if ri_next >= max_index:
                 ri_next = 0
-                print('Wrapped target corpus')
                 wrapped = True
             self.iterators[split] = ri_next
             # add <bos>

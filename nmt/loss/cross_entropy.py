@@ -18,9 +18,9 @@ class SmoothMLCriterion(nn.Module):
     def __init__(self, job_name, params):
         super().__init__()
         self.logger = logging.getLogger(job_name)
-        self.th_mask = 1  # both pad and unk
-        self.normalize_batch = True
-        self.eps = params['label_smoothing']
+        self.th_mask = params.get('mask_threshold', 1)  # both pad and unk
+        self.normalize_batch = bool(params.get('normalize_batch', 1))
+        self.eps = params.get('label_smoothing', 0.1)
         self.version = 'label smoothed ml'
 
     def log(self):
@@ -30,7 +30,6 @@ class SmoothMLCriterion(nn.Module):
         """
         logp : the decoder logits (N, seq_length, V)
         target : the ground truth labels (N, seq_length)
-        scores: scalars to scale the loss of each sentence (N, 1)
         """
         mask = target.gt(self.th_mask).float()
         output, ml_loss = get_smooth_ml_loss(logp, target, mask,
@@ -39,17 +38,17 @@ class SmoothMLCriterion(nn.Module):
         return {"final": output, "ml": ml_loss}, {}
 
 
+
+
 class MLCriterion(nn.Module):
     """
-    The default cross entropy loss with the option
-    of scaling the sentence loss
+    The default cross entropy loss
     """
     def __init__(self, job_name, params):
         super().__init__()
         self.logger = logging.getLogger(job_name)
-        self.th_mask = 1  # both pad and unk
-        self.normalize_batch = True
-        self.penalize_confidence = params['penalize_confidence']
+        self.th_mask = params.get('mask_threshold', 1)  # both pad and unk
+        self.normalize = params.get('normalize', 'ntokens')
         self.version = 'ml'
 
     def log(self):
@@ -59,13 +58,45 @@ class MLCriterion(nn.Module):
         """
         logp : the decoder logits (N, seq_length, V)
         target : the ground truth labels (N, seq_length)
-        scores: scalars to scale the loss of each sentence (N, 1)
         """
-        mask = target.gt(self.th_mask).float()
-        output = get_ml_loss(logp, target, mask,
-                             norm=self.normalize_batch,
-                             penalize=self.penalize_confidence)
+        output = self.get_ml_loss(logp, target)
         return {"final": output, "ml": output}, {}
+
+    def get_ml_loss(self, logp, target):
+        """
+        Compute the usual ML loss
+        """
+        # print('logp:', logp.size(), "target:", target.size())
+        batch_size = logp.size(0)
+        seq_length = logp.size(1)
+        vocab = logp.size(2)
+        target = target[:, :seq_length]
+        logp = to_contiguous(logp).view(-1, logp.size(2))
+        target = to_contiguous(target).view(-1, 1)
+        mask = target.gt(self.th_mask)
+        ml_output = - logp.gather(1, target)[mask]
+        ml_output = torch.sum(ml_output)
+
+        if self.normalize == 'ntokens':
+            # print('initial ml:', ml_output.data.item())
+            norm = torch.sum(mask)
+            ml_output /= norm.float()
+            # print('norm ml:', ml_output.data.item(), '// %d' % norm.data.item())
+        elif self.normalize == 'seqlen':
+            # print('initial ml:', ml_output.data.item())
+            norm = seq_length
+            ml_output /= norm
+            # print('norm ml:', ml_output.data.item(), '// %d' % norm)
+        elif self.normalize == 'batch':
+            # print('initial ml:', ml_output.data.item())
+            norm = batch_size
+            ml_output /= norm
+            # print('norm ml:', ml_output.data.item(), '// %d' % norm)
+
+        else:
+            raise ValueError('Unknown normalizing scheme')
+        return ml_output
+
 
 
 class MLCriterionNLL(nn.Module):
@@ -172,6 +203,3 @@ def get_smooth_ml_loss(logp, target, mask,
         smooth_loss /= torch.sum(binary_mask)
     output = (1 - eps) * ml_output + eps * smooth_loss
     return output, ml_output
-
-
-

@@ -1,18 +1,19 @@
-#!/bin/bash
-# Adapted from https://github.com/facebookresearch/MIXER/blob/master/prepareData.sh
+#!/usr/bin/env bash
+# Adapted from https://github.com/pytorch/fairseq/blob/master/
+#                    examples/translation/prepare-wmt14en2de.sh
+# run with --scaling18
 
-echo 'Cloning Moses github repository (for tokenization scripts)...'
-git clone https://github.com/moses-smt/mosesdecoder.git
+if [ ! -d mosesdecoder ]; then 
+    echo 'Cloning Moses github repository (for tokenization scripts)...'
+    git clone https://github.com/moses-smt/mosesdecoder.git
+fi
 
-echo 'Cloning Subword NMT repository (for BPE pre-processing)...'
-git clone https://github.com/rsennrich/subword-nmt.git
 
 SCRIPTS=mosesdecoder/scripts
 TOKENIZER=$SCRIPTS/tokenizer/tokenizer.perl
 CLEAN=$SCRIPTS/training/clean-corpus-n.perl
 NORM_PUNC=$SCRIPTS/tokenizer/normalize-punctuation.perl
 REM_NON_PRINT_CHAR=$SCRIPTS/tokenizer/remove-non-printing-char.perl
-BPEROOT=subword-nmt
 BPE_TOKENS=40000
 
 URLS=(
@@ -57,7 +58,7 @@ fi
 src=en
 tgt=de
 lang=en-de
-prep=wmt14_en_de_scaling
+prep=wmt_en_de
 tmp=$prep/tmp
 orig=orig
 dev=dev/newstest2013
@@ -143,12 +144,12 @@ for l in $src $tgt; do
 done
 
 echo "learn_bpe.py on ${TRAIN}..."
-python $BPEROOT/learn_bpe.py -s $BPE_TOKENS < $TRAIN > $BPE_CODE
+subword-nmt learn-bpe -s $BPE_TOKENS < $TRAIN > $BPE_CODE
 
 for L in $src $tgt; do
     for f in train.$L valid.$L test.$L; do
         echo "apply_bpe.py to ${f}..."
-        python $BPEROOT/apply_bpe.py -c $BPE_CODE < $tmp/$f > $tmp/bpe.$f
+        subword-nmt apply-bpe -c $BPE_CODE < $tmp/$f > $tmp/bpe.$f
     done
 done
 
@@ -165,3 +166,6 @@ fi
 for L in $src $tgt; do
     cp $tmp/bpe.test.$L $prep/test.$L
 done
+
+mkdir -p ../data
+mv $prep ../data/

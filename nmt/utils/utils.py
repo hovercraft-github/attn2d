@@ -71,4 +71,24 @@ def decode_sequence(ix_to_word, seq, eos, bos, remove_bpe=0):
     return out
 
 
+def get_scores(logp, target):
+    """
+    Return scores per sentence
+    """
+    batch_size = logp.size(0)  # assume 1
+    seq_length = logp.size(1)
+    mask = target.gt(1).float()
+
+    target = target[:, :seq_length]
+    mask = mask[:, :seq_length]
+    logp = to_contiguous(logp).view(-1, logp.size(2))
+    target = to_contiguous(target).view(-1, 1)
+    mask = to_contiguous(mask).view(-1, 1)
+    ml_output = - logp.gather(1, target) * mask
+    ml_output = torch.sum(ml_output) / torch.sum(mask)
+    score = - ml_output
+    # normalize
+    # ml_output /= torch.sum(mask)
+    return score
+
 

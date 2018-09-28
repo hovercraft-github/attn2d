@@ -1,8 +1,8 @@
-multi_gpus : 0
 modelname:  default
+    
+model : pervasive
 start_from : 0
 start_from_best : 1
-model : pervasive
 
 encoder:
   type : lookup
@@ -50,16 +50,23 @@ decoder:
 
 network :
   type: densenet
-  kernels : 3
-  dilation : 1
-  groups : 1
-  conv_dropout : 0
   growth_rate : 32
   num_layers: 20
-  gated : 0
-  half_inputs : 0
+  divide_channels : 2
+  kernels : 3
+  kernel : 3
+  dilation : 1
+  groups : 1
   layer_type: 1
+  transition_type : 1
+  bias : 0
+  gated : 0
+  weigth_norm : 0
+  init_weights: 0
+  conv_dropout : 0
+  efficient : 1
 
+ 
 aggregator:
   project_context : none
   mode : max

@@ -1,10 +1,17 @@
-modelname: iwslt_l24
+modelname: iwslt_l24_log
 default_config : config/pervasive.yaml
 
 network :
+  type: log-densenet
   num_layers : 24
   kernels: 3
   conv_dropout : .2
+
+encoder:
+  input_dim : 128
+
+decoder:
+  input_dim : 128
 
 data:
   src : de

@@ -10,6 +10,7 @@ import torch
 from nmt.utils import decode_sequence
 import nmt.utils.logging as lg
 from nmt.models.gnmt import GNMTGlobalScorer
+from nmt.utils import get_scores
 
 
 def corpus_bleu(hypotheses, references, smoothing=False, order=4, **kwargs):
@@ -71,10 +72,48 @@ def corpus_bleu(hypotheses, references, smoothing=False, order=4, **kwargs):
 
     return bleu, 'penalty={:.3f} ratio={:.3f}'.format(bp, hyp_length / ref_length)
 
+def score_split(job_name, model, src_loader, trg_loader, eval_kwargs):
+    """Return P(trg | src) for every pair"""
+    scores = []
+    batch_size = eval_kwargs.get('batch_size', 1)
+    max_samples = eval_kwargs.get('max_samples', -1)
+    split = eval_kwargs.get('split', 'val')
+    verbose = eval_kwargs.get('verbose', 0)
+    eval_kwargs['BOS'] = trg_loader.bos
+    eval_kwargs['EOS'] = trg_loader.eos
+    eval_kwargs['PAD'] = trg_loader.pad
+    eval_kwargs['UNK'] = trg_loader.unk
+    logger = logging.getLogger(job_name)
+
+    # Switch to evaluation mode
+    model.eval()
+    src_loader.reset_iterator(split)
+    trg_loader.reset_iterator(split)
+    n = 0
+    start = time.time()
+    while True:
+        # get batch
+        batch_size = 1
+        data_src, order = src_loader.get_src_batch(split, batch_size)
+        data_trg = trg_loader.get_trg_batch(split, order, batch_size)
+        n += batch_size
+        sc = get_scores(model(data_src, data_trg), data_trg['out_labels'])
+        scores.append(sc.data.item())
+        print('score:', scores[-1])
+        if max_samples == -1:
+            ix1 = data_src['bounds']['it_max']
+        else:
+            ix1 = max_samples
+        if data_src['bounds']['wrapped']:
+            break
+        if n >= ix1:
+            break
+    logger.warn('Evaluated %d samples in %.2f s', n, time.time()-start)
+    return scores
+
 
 def evaluate_val_loss(job_name, trainer, src_loader, trg_loader, eval_kwargs):
     """Evaluate model."""
-    preds = []
     ground_truths = []
     batch_size = eval_kwargs.get('batch_size', 1)
     max_samples = eval_kwargs.get('max_samples', -1)
@@ -410,3 +449,7 @@ def track_model(job_name, model, src_loader, trg_loader, eval_kwargs):
             'channels_cst': C,
             "bleu": bleu_moses,
             }
+
+
+
+    

@@ -1,4 +1,4 @@
-from math import sqrt
+from math import sqrt, pi, cos, ceil
 from torch import optim
 from torch.optim import lr_scheduler
 
@@ -20,6 +20,27 @@ def LRScheduler(opt, optimizer, last_epoch=-1):
                                                        factor=opt['decay_rate'],
                                                        verbose=True,
                                                        threshold=0.05)
+
+    elif ref == "cosine-ep":
+        scheduler = lr_scheduler.CosineAnnealingLR(optimizer,
+                                                   T_max=opt['max_epochs'],
+                                                   eta_min=opt.get('min_lr', 0))
+
+    elif ref == "cosine":
+        scheduler = lr_scheduler.CosineAnnealingLR(optimizer,
+                                                   T_max=opt['max_updates'],
+                                                   eta_min=opt.get('min_lr', 0))
+    elif ref == "shifted-cosine":
+        scheduler = ShiftedCosine(optimizer,
+                                  T_max=opt['max_updates'],
+                                  cycles=opt['cycles'])
+
+    elif ref == "plateau-cosine":
+        scheduler = PlateauCosine(optimizer,
+                                  T1=opt['T1'],
+                                  T2=opt['T2'],
+                                  eta1=opt['eta1'],
+                                  eta2=opt['eta2'])
 
     elif ref == "step":
         scheduler = lr_scheduler.StepLR(optimizer,
@@ -270,3 +291,52 @@ class InverseSquareRoot(lr_scheduler._LRScheduler):
         return [base_lr * scale_factor
                 for base_lr in self.base_lrs]
 
+
+class ShiftedCosine(lr_scheduler._LRScheduler):
+
+    """
+    Similar to cosine
+    """
+
+    def __init__(self, optimizer, cycles, T_max, last_epoch=-1):
+        self.T_max = T_max
+        self.cycle_duration = ceil(T_max / cycles)
+        super().__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        scale_factor = 1/2 * (cos(pi * (self.last_epoch % self.cycle_duration) / self.cycle_duration) + 1)
+        return [base_lr * scale_factor
+                for base_lr in self.base_lrs]
+
+
+class PlateauCosine(lr_scheduler._LRScheduler):
+
+    """
+    Steep decrease then ~ plateau
+    [self.eta_min + (base_lr - self.eta_min) *
+                    (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2
+                                    for base_lr in self.base_lrs]
+    """
+
+    def __init__(self, optimizer, T1, T2, eta1, eta2, last_epoch=-1):
+        self.T1 = int(T1)
+        self.T2 = int(T2)
+        self.eta1 = float(eta1)
+        self.eta2 = float(eta2)
+        super().__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        if self.last_epoch > self.T1:
+            # use a wider period
+            return [self.eta2 + (self.eta1 - self.eta2) *
+                    (1 + cos(pi * self.last_epoch / self.T2)) / 2
+                    for base_lr in self.base_lrs]
+
+        # very steep
+        return [self.eta1 + (base_lr - self.eta1) *
+                (1 + cos(pi * self.last_epoch / self.T1)) / 2
+                for base_lr in self.base_lrs]
+
+
+
+     

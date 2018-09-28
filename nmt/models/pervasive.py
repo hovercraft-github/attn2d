@@ -2,14 +2,18 @@
 Pervasive attention
 """
 import math
+import itertools
 import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from .densenet import DenseNet
+from .efficient_densenet import Efficient_DenseNet
+from .log_efficient_densenet import Log_Efficient_DenseNet
+
 from .aggregator import Aggregator
-from .embedding import Embedding
+from .embedding import Embedding, ConvEmbedding
 from .beam_search import Beam
 
 
@@ -32,6 +36,7 @@ class Pervasive(nn.Module):
         self.logger = logging.getLogger(jobname)
         self.version = 'conv'
         self.params = params
+        self.merge_mode  = params['network'].get('merge_mode', 'concat')
         self.src_vocab_size = src_vocab_size
         self.trg_vocab_size = trg_vocab_size
         self.padding_idx = special_tokens['PAD']
@@ -39,13 +44,21 @@ class Pervasive(nn.Module):
         # assert self.padding_idx == 0, "Padding token should be 0"
         self.bos_token = special_tokens['BOS']
         self.eos_token = special_tokens['EOS']
-        self.kernel_size = params['network']['kernels'][
-            0]  # assume using the same kernel size all over
-        self.src_embedding = Embedding(
-            params['encoder'],
-            src_vocab_size,
-            padding_idx=self.padding_idx
-            )
+        self.kernel_size = max(list(itertools.chain.from_iterable(
+            params['network']['kernels']
+            )))
+        if params['encoder']['type'] == "none":
+            self.src_embedding = Embedding(
+                params['encoder'],
+                src_vocab_size,
+                padding_idx=self.padding_idx
+                )
+        elif params['encoder']['type'] == "conv":
+            self.src_embedding = ConvEmbedding(
+                params['encoder'],
+                src_vocab_size,
+                padding_idx=self.padding_idx
+                )
 
         self.trg_embedding = Embedding(
             params['decoder'],
@@ -54,18 +67,55 @@ class Pervasive(nn.Module):
             pad_left=True
             )
 
-        self.input_channels = self.src_embedding.dimension + \
-                              self.trg_embedding.dimension
+        if self.merge_mode == 'concat':
+            self.input_channels = self.src_embedding.dimension + \
+                                  self.trg_embedding.dimension
+        elif self.merge_mode == "product":
+            self.input_channels = self.src_embedding.dimension 
+        elif self.merge_mode == "bilinear":
+            bilinear_dim = params['network'].get('bilinear_dimension', 128)
+            self.input_channels = bilinear_dim
+            std = params['encoder'].get('init_std', 0.01)
+            self.bw = nn.Parameter(std * torch.randn(bilinear_dim))
+        elif self.merge_mode == "multi-sim":
+            self.sim_dim = params['network'].get('similarity_dimension', 128)
+            self.input_channels = self.sim_dim
+            std = params['encoder'].get('init_std', 0.01)
+            self.bw = nn.Parameter(std * torch.randn(self.sim_dim,
+                                                     self.trg_embedding.dimension,
+                                                     self.src_embedding.dimension))
+
+        elif self.merge_mode == "multi-sim2":
+            self.sim_dim = params['network'].get('similarity_dimension', 128)
+            self.input_channels = self.sim_dim
+            std = params['encoder'].get('init_std', 0.01)
+            self.bw = nn.Parameter(torch.empty(self.sim_dim,
+                                               self.trg_embedding.dimension,
+                                               self.src_embedding.dimension))
+
+            nn.init.orthogonal_(self.bw)
+        else:
+            raise ValueError('Unknown merging mode')
+
 
         self.logger.info('Model input channels: %d', self.input_channels)
         self.logger.info("Selected network: %s", params['network']['type'])
 
 
-        if params['network']['half_inputs']:
-            self.logger.warning('Halfing the input channels')
+        if params['network']['divide_channels'] > 1:
+            self.logger.warning('Reducing the input channels by %d',
+                                params['network']['divide_channels'])
 
         if params["network"]['type'] == "densenet":
             self.net = DenseNet(self.input_channels, params['network'])
+            self.network_output_channels = self.net.output_channels
+
+        elif params["network"]['type'] == "efficient-densenet":
+            self.net = Efficient_DenseNet(self.input_channels, params['network'])
+            self.network_output_channels = self.net.output_channels
+
+        elif params["network"]['type'] == "log-densenet":
+            self.net = Log_Efficient_DenseNet(self.input_channels, params['network'])
             self.network_output_channels = self.net.output_channels
         else:
             raise ValueError(
@@ -80,9 +130,10 @@ class Pervasive(nn.Module):
         else:
             last_dim = None
 
-        self.aggregator = Aggregator(self.network_output_channels, last_dim,
+        self.aggregator = Aggregator(self.network_output_channels,
+                                     last_dim,
                                      params['aggregator'])
-        self.final_output_channels = self.aggregator.output_channels
+        self.final_output_channels = self.aggregator.output_channels  # d_h
 
         self.prediction_dropout = nn.Dropout(
             params['decoder']['prediction_dropout'])
@@ -98,13 +149,68 @@ class Pervasive(nn.Module):
         """
         Called after setup.buil_model to intialize the weights
         """
-        if self.params['network']['init_weights']:
-            nn.init.kaiming_normal(self.prediction.weight)
+        if self.params['network']['init_weights'] == "kaiming":
+            nn.init.kaiming_normal_(self.prediction.weight)
 
         self.src_embedding.init_weights()
         self.trg_embedding.init_weights()
         self.prediction.bias.data.fill_(0)
     
+    def merge(self, src_emb, trg_emb):
+        """
+        Merge source and target embeddings
+        *_emb : N, T_t, T_s, d
+        """
+        N, Tt, Ts, _ = src_emb.size()
+        if self.merge_mode == 'concat':
+            # 2d grid:
+            return torch.cat((src_emb, trg_emb), dim=3)
+        elif self.merge_mode == 'product':
+            return src_emb * trg_emb
+        elif self.merge_mode == 'bilinear':
+            # self.bw : d
+            # for every target position
+            X = []
+            for t in range(Tt):
+                # trg_emb[:, t, :] (N, 1, d_t)
+                e = trg_emb[:, t:t+1, 0, :]
+                w = self.bw.expand(N, -1).unsqueeze(-1)
+                # print('e:', e.size())
+                # print('bw:', w.size())
+                x = torch.bmm(w, e).transpose(1, 2)
+                # print('x:', x.size())
+                # x  (N, d_t, d) & src_emb (N, T_s, d_s = d_t) => (N, 1, T_s, d)
+                x = torch.bmm(src_emb[:,0], x).unsqueeze(1)
+                # print('appending:', x.size())
+                X.append(x)
+            return torch.cat(X, dim=1)
+
+        elif self.merge_mode == "multi-sim":
+            # self.bw d, d_t, ds
+            X = []
+            for k in range(self.sim_dim):
+                w = self.bw[k].expand(N, -1, -1)
+                # print('w:', w.size())
+                # print(trg_emb[:,:,0].size())
+                # print(src_emb[:,0].size())
+                x = torch.bmm(torch.bmm(trg_emb[:,:,0], w), src_emb[:,0].transpose(1,2)).unsqueeze(-1)
+                # print('x:', x.size())
+                X.append(x)
+            return torch.cat(X, dim=-1)
+
+        elif self.merge_mode == "multi-sim2":
+            # self.bw d, d_t, ds
+            X = []
+            for n in range(N):
+                x = torch.bmm(torch.bmm(trg_emb[n:n+1,:,0].expand(self.sim_dim, -1, -1), self.bw),
+                              src_emb[n:n+1,0].expand(self.sim_dim, -1, -1).transpose(1,2)
+                             ).unsqueeze(0)
+                X.append(x)
+            return torch.cat(X, dim=0).permute(0, 2, 3, 1)
+
+        else:
+            raise ValueError('Unknown merging mode')
+
     # @profile
     def forward(self, data_src, data_trg):
         src_emb = self.src_embedding(data_src)
@@ -114,7 +220,7 @@ class Pervasive(nn.Module):
         # 2d grid:
         src_emb = _expand(src_emb.unsqueeze(1), 1, Tt)
         trg_emb = _expand(trg_emb.unsqueeze(2), 2, Ts)
-        X = torch.cat((src_emb, trg_emb), dim=3)
+        X = self.merge(src_emb, trg_emb)
         # del src_emb, trg_emb
         X = self._forward(X, data_src['lengths'])
         logits = F.log_softmax(
@@ -122,10 +228,13 @@ class Pervasive(nn.Module):
         return logits
 
     # @profile
-    def _forward(self, X, src_lengths=None, mask=None):
+    def _forward(self, X, src_lengths=None, track=False):
         X = X.permute(0, 3, 1, 2)
         X = self.net(X)
-        X = self.aggregator(X, src_lengths)
+        if track:
+            X, attn = self.aggregator(X, src_lengths, track=True)
+            return X, attn
+        X = self.aggregator(X, src_lengths, track=track)
         return X
 
     def update(self, X, src_lengths=None, track=False):
@@ -138,33 +247,34 @@ class Pervasive(nn.Module):
             X = self.aggregator(X, src_lengths, track=track)
         return X, attn
 
-    def track(self, data_src, kwargs={}):
+    def track_update(self, data_src, kwargs={}):
+        """
+        Sample and return tracked activations
+        Using update where past activations are discarded
+        """
         batch_size = data_src['labels'].size(0)
         src_emb = self.src_embedding(data_src)
         Ts = src_emb.size(1)  # source sequence length
-        trg_labels = torch.LongTensor(
-            [[self.bos_token] for i in range(batch_size)]).cuda()
+        max_length = int(
+            kwargs.get('max_length_a', 0) * Ts +
+            kwargs.get('max_length_b', 50)
+            )
 
+        trg_labels = torch.LongTensor(
+            [[self.bos_token] for i in range(batch_size)]
+            ).cuda()
         trg_emb = self.trg_embedding.single_token(trg_labels, 0)
         # 2d grid:
         src_emb = src_emb.unsqueeze(1)  # Tt=1
         src_emb_ = src_emb
-        max_length = int(
-            kwargs.get('max_length_a', 0) * Ts +
-            kwargs.get('max_length_b', 50))
-
         seq = []
         alphas = []
         aligns = []
         activ_aligns = []
         activs = []
-        embed_activs = []
         trg_emb = _expand(trg_emb.unsqueeze(2), 2, Ts)
-        E = torch.mm(self.prediction.weight.data,
-                     self.aggregator.lin.weight.data)
-
         for t in range(max_length):
-            X = torch.cat((src_emb, trg_emb), dim=3)
+            X = self.merge(src_emb, trg_emb)
             Y, attn = self.update(X, data_src["lengths"], track=True)
             # align, activ_distrib, activ = attn
             if attn[0] is not None:
@@ -172,24 +282,21 @@ class Pervasive(nn.Module):
             aligns.append(attn[1])
             activ_aligns.append(attn[2])
             activs.append(attn[3][0])
-            cstr = torch.sum(E, dim=0).repeat(Ts, 1).cpu().numpy()
-            clean_cstr = cstr[0]
-            # cstr = cstr * attn[3][0]  # (N=1, Ts, d)
-            embed_activs.append(None)
             proj = self.prediction_dropout(Y[:, -1, :])
             logits = F.log_softmax(self.prediction(proj), dim=1)
             if self.padding_idx:
                 logits[:, self.padding_idx] = -math.inf
                 npargmax = logits.data.cpu().numpy().argmax(axis=-1)
             else:
-                logits = logits[:, 1:]  # remvoe pad
+                logits = logits[:, 1:]  # remove pad
                 npargmax = 1 + logits.data.cpu().numpy().argmax(axis=-1)
             next_preds = torch.from_numpy(npargmax).view(-1, 1).cuda()
             seq.append(next_preds)
             trg_emb_t = self.trg_embedding.single_token(next_preds,
                                                         t).unsqueeze(2)
             trg_emb_t = _expand(trg_emb_t, 2, Ts)
-            max_h = self.kernel_size // 2 + 1  # actually w/o +1, after that concat to have the desired width // train models with k=3 for less memory
+            max_h = self.kernel_size // 2 + 1  
+            # keep only what's needed
             if trg_emb.size(1) > max_h:
                 trg_emb = trg_emb[:, -max_h:, :, :]
             trg_emb = torch.cat((trg_emb, trg_emb_t), dim=1)
@@ -201,37 +308,97 @@ class Pervasive(nn.Module):
                               -1), 1)
                 if unfinished.sum().data.item() == 0:
                     break
-
         seq = torch.cat(seq, 1)
         self.net.reset_buffers()
         self.trg_embedding.reset_buffers()
-        # return seq, attention(max), activation & alphas(if attn)
-        return seq, alphas, aligns, activ_aligns, activs, embed_activs, clean_cstr
+        return seq, alphas, aligns, activ_aligns, activs
 
-    # @profile
-    def sample(self, data_src, scorer, kwargs={}):
-        beam_size = kwargs.get('beam_size', 1)
-        if beam_size > 1:
-            return self.sample_beam(data_src, kwargs)
 
+    def track(self, data_src, kwargs={}):
+        """
+        Sample and return tracked activations
+        """
         batch_size = data_src['labels'].size(0)
         src_emb = self.src_embedding(data_src)
         Ts = src_emb.size(1)  # source sequence length
-        trg_labels = torch.LongTensor(
-            [[self.bos_token] for i in range(batch_size)]).cuda()
-
-        trg_emb = self.trg_embedding.single_token(trg_labels, 0)
-        # Coupling tensor:
-        src_emb = src_emb.unsqueeze(1)  # Tt=1
-        src_emb_ = src_emb
         max_length = int(
             kwargs.get('max_length_a', 0) * Ts +
-            kwargs.get('max_length_b', 50))
+            kwargs.get('max_length_b', 50)
+            )
+        trg_labels = torch.LongTensor(
+            [[self.bos_token] for i in range(batch_size)]
+            ).cuda()
+        trg_emb = self.trg_embedding.single_token(trg_labels, 0)
+        # 2d grid:
+        src_emb = src_emb.unsqueeze(1)  # Tt=1
+        src_emb_ = src_emb
+        seq = []
+        alphas = []
+        aligns = []
+        activ_aligns = []
+        activs = []
+        trg_emb = _expand(trg_emb.unsqueeze(2), 2, Ts)
+        for t in range(max_length):
+            X = self.merge(src_emb, trg_emb)
+            Y, attn = self._forward(X, data_src["lengths"], track=True)
+            if attn[0] is not None:
+                alphas.append(attn[0])
+            aligns.append(attn[1])
+            activ_aligns.append(attn[2])
+            activs.append(attn[3][0])
+            proj = self.prediction_dropout(Y[:, -1, :])
+            logits = F.log_softmax(self.prediction(proj), dim=1)
+            if self.padding_idx:
+                logits[:, self.padding_idx] = -math.inf
+                npargmax = logits.data.cpu().numpy().argmax(axis=-1)
+            else:
+                logits = logits[:, 1:]  # remove pad
+                npargmax = 1 + logits.data.cpu().numpy().argmax(axis=-1)
+            next_preds = torch.from_numpy(npargmax).view(-1, 1).cuda()
+            seq.append(next_preds)
+            trg_emb_t = self.trg_embedding.single_token(next_preds,
+                                                        t).unsqueeze(2)
+            trg_emb_t = _expand(trg_emb_t, 2, Ts)
+            trg_emb = torch.cat((trg_emb, trg_emb_t), dim=1)
+            src_emb = _expand(src_emb_, 1, trg_emb.size(1))
+            if t >= 1:
+                # stop when all finished
+                unfinished = torch.add(
+                    torch.mul((next_preds == self.eos_token).type_as(logits),
+                              -1), 1)
+                if unfinished.sum().data.item() == 0:
+                    break
+        seq = torch.cat(seq, 1)
+        self.trg_embedding.reset_buffers()
+        return seq, alphas, aligns, activ_aligns, activs
 
+    def sample_update(self, data_src, scorer, kwargs={}):
+        """
+        Sample in evaluation mode
+        Using update where past activations are discarded
+        """
+        beam_size = kwargs.get('beam_size', 1)
+        if beam_size > 1:
+            # Without update
+            return self.sample_beam(data_src, kwargs)
+        batch_size = data_src['labels'].size(0)
+        src_emb = self.src_embedding(data_src)
+        Ts = src_emb.size(1)  # source sequence length
+        max_length = int(
+            kwargs.get('max_length_a', 0) * Ts +
+            kwargs.get('max_length_b', 50)
+            )
+        trg_labels = torch.LongTensor(
+            [[self.bos_token] for i in range(batch_size)]
+            ).cuda()
+        trg_emb = self.trg_embedding.single_token(trg_labels, 0)
+        # 2d grid:
+        src_emb = src_emb.unsqueeze(1)  # Tt=1
+        src_emb_ = src_emb
         seq = []
         trg_emb = _expand(trg_emb.unsqueeze(2), 2, Ts)
         for t in range(max_length):
-            X = torch.cat((src_emb, trg_emb), dim=3)
+            X = self.merge(src_emb, trg_emb)
             Y, _ = self.update(X, data_src["lengths"])
             proj = self.prediction_dropout(Y[:, -1, :])
             logits = F.log_softmax(self.prediction(proj), dim=1)
@@ -239,14 +406,15 @@ class Pervasive(nn.Module):
                 logits[:, self.padding_idx] = -math.inf
                 npargmax = logits.data.cpu().numpy().argmax(axis=-1)
             else:
-                logits = logits[:, 1:]  # remvoe pad
+                logits = logits[:, 1:]  # remove pad
                 npargmax = 1 + logits.data.cpu().numpy().argmax(axis=-1)
             next_preds = torch.from_numpy(npargmax).view(-1, 1).cuda()
             seq.append(next_preds)
             trg_emb_t = self.trg_embedding.single_token(next_preds,
                                                         t).unsqueeze(2)
             trg_emb_t = _expand(trg_emb_t, 2, Ts)
-            max_h = self.kernel_size // 2 + 1  # actually w/o +1, after that concat to have the desired width // train models with k=3 for less memory
+            max_h = self.kernel_size // 2 + 1 
+            # keep only what's needed
             if trg_emb.size(1) > max_h:
                 trg_emb = trg_emb[:, -max_h:, :, :]
             trg_emb = torch.cat((trg_emb, trg_emb_t), dim=1)
@@ -258,14 +426,63 @@ class Pervasive(nn.Module):
                               -1), 1)
                 if unfinished.sum().data.item() == 0:
                     break
-
         seq = torch.cat(seq, 1)
         self.net.reset_buffers()
         self.trg_embedding.reset_buffers()
-        return seq, None  # FIXME return scores as well
+        return seq, None
+
+    def sample(self, data_src, scorer, kwargs={}):
+        """
+        Sample in evaluation mode
+        """
+        beam_size = kwargs.get('beam_size', 1)
+        if beam_size > 1:
+            return self.sample_beam(data_src, kwargs)
+        batch_size = data_src['labels'].size(0)
+        src_emb = self.src_embedding(data_src)
+        Ts = src_emb.size(1)  # source sequence length
+        max_length = int(
+            kwargs.get('max_length_a', 0) * Ts +
+            kwargs.get('max_length_b', 50)
+            )
+        trg_labels = torch.LongTensor(
+            [[self.bos_token] for i in range(batch_size)]
+            ).cuda()
+        trg_emb = self.trg_embedding.single_token(trg_labels, 0)
+        # 2d grid:
+        src_emb = src_emb.unsqueeze(1)  # Tt=1
+        src_emb_ = src_emb
+        seq = []
+        trg_emb = _expand(trg_emb.unsqueeze(2), 2, Ts)
+        for t in range(max_length):
+            X = self.merge(src_emb, trg_emb)
+            Y = self._forward(X, data_src["lengths"])
+            proj = self.prediction_dropout(Y[:, -1, :])
+            logits = F.log_softmax(self.prediction(proj), dim=1)
+            if self.padding_idx:
+                logits[:, self.padding_idx] = -math.inf
+                npargmax = logits.data.cpu().numpy().argmax(axis=-1)
+            else:
+                logits = logits[:, 1:]  # remove pad
+                npargmax = 1 + logits.data.cpu().numpy().argmax(axis=-1)
+            next_preds = torch.from_numpy(npargmax).view(-1, 1).cuda()
+            seq.append(next_preds)
+            trg_emb_t = self.trg_embedding.single_token(next_preds,
+                                                        t).unsqueeze(2)
+            trg_emb_t = _expand(trg_emb_t, 2, Ts)
+            trg_emb = torch.cat((trg_emb, trg_emb_t), dim=1)
+            src_emb = _expand(src_emb_, 1, trg_emb.size(1))
+            if t >= 1:
+                # stop when all finished
+                unfinished = torch.add(
+                    torch.mul((next_preds == self.eos_token).type_as(logits),
+                              -1), 1)
+                if unfinished.sum().data.item() == 0:
+                    break
+        seq = torch.cat(seq, 1)
+        return seq, None
 
     def sample_beam(self, data_src, kwargs={}):
-        # FIXME use update and reorder incremental states
         beam_size = kwargs['beam_size']
         src_labels = data_src['labels']
         src_lengths = data_src['lengths']
@@ -274,12 +491,12 @@ class Pervasive(nn.Module):
         batch_idx = list(range(batch_size))
         remaining_sents = batch_size
         Ts = src_labels.size(1)  # source sequence length
-        src_labels = src_labels.repeat(beam_size, 1)
-        src_lengths = src_lengths.repeat(beam_size, 1)
-        # max_length = kwargs.get('max_length', 50)
         max_length = int(
             kwargs.get('max_length_a', 0) * Ts +
-            kwargs.get('max_length_b', 50))
+            kwargs.get('max_length_b', 50)
+            )
+        src_labels = src_labels.repeat(beam_size, 1)
+        src_lengths = src_lengths.repeat(beam_size, 1)
         for t in range(max_length):
             # Source:
             src_emb = self.src_embedding({
@@ -300,12 +517,13 @@ class Pervasive(nn.Module):
                 'lengths': None
             }).unsqueeze(2).repeat(1, 1, Ts, 1)
             # X: N, Tt, Ts, Ds+Dt
-            X = torch.cat((src_emb, trg_emb), dim=3)
+            X = self.merge(src_emb, trg_emb)
             Y = self._forward(X, src_lengths)
             proj = self.prediction_dropout(Y[:, -1, :])
             logits = F.log_softmax(self.prediction(proj), dim=1)
-            word_lk = logits.view(beam_size, remaining_sents, -1).transpose(
-                0, 1).contiguous()
+            word_lk = logits.view(beam_size,
+                                  remaining_sents,
+                                  -1).transpose(0, 1).contiguous()
             active = []
             for b in range(batch_size):
                 if beam[b].done:
@@ -313,8 +531,8 @@ class Pervasive(nn.Module):
                 idx = batch_idx[b]
                 if not beam[b].advance(word_lk.data[idx], t):
                     active += [b]
-                # update trg_emb FIXME
-                trg_labels_prev = trg_labels.view(beam_size, remaining_sents,
+                trg_labels_prev = trg_labels.view(beam_size,
+                                                  remaining_sents,
                                                   t + 1)
                 trg_labels = trg_labels_prev[
                     beam[b].get_current_origin()].view(-1, t + 1)
@@ -327,7 +545,8 @@ class Pervasive(nn.Module):
 
             def update_active(t):
                 # select only the remaining active sentences
-                view = t.data.contiguous().view(beam_size, remaining_sents,
+                view = t.data.contiguous().view(beam_size,
+                                                remaining_sents,
                                                 *t.size()[1:])
                 new_size = list(view.size())
                 new_size[1] = new_size[1] * len(active_idx) \
@@ -346,11 +565,9 @@ class Pervasive(nn.Module):
         for b in range(batch_size):
             scores, ks = beam[b].sort_best()
             allScores += [scores[:n_best]]
-            # hyps = list(zip(*[beam[b].get_hyp(k) for k in ks[:n_best]]))
             hyps = beam[b].get_hyp(ks[0])
             allHyp += [hyps]
         return allHyp, allScores
-
 
 
 class Pervasive_Parallel(nn.DataParallel):
@@ -371,8 +588,9 @@ class Pervasive_Parallel(nn.DataParallel):
         # assert self.pad_token == 0, "Padding token should be 0"
         self.bos_token = special_tokens['BOS']
         self.eos_token = special_tokens['EOS']
-        self.kernel_size = params['network']['kernels'][
-            0]  # assume using the same kernel size all over
+        self.kernel_size = max(list(itertools.chain.from_iterable(
+            params['network']['kernels']
+            )))
 
     def init_weights(self):
         self.module.init_weights()

@@ -72,7 +72,9 @@ class Trainer(object):
         epoch = self.epoch
         iteration = self.iteration
         if not self.lr_patient:
-            if self.lr_scheduler.mode in ["step-iter", "inverse-square"]:
+            if self.lr_scheduler.mode in ["step-iter", "inverse-square",
+                                          "cosine", 'shifted-cosine',
+                                          'plateau-cosine']:
                 self.lr_scheduler.step(iteration)
             else:
                 self.lr_scheduler.step(epoch - 1)
@@ -225,6 +227,10 @@ class Trainer(object):
 
             for k in saved:
                 if "increment" in k:
+                    del saved_state[k]
+                if "transiton" in k:
+                    kk = k.replace("transiton", "transition")
+                    saved_state[kk] = saved_state[k]
                     del saved_state[k]
             self.model.load_state_dict(saved_state)
             # load the optimizer's last state:

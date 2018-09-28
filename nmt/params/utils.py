@@ -4,6 +4,7 @@ Miscellaneous
 import os
 import os.path as osp
 import collections
+import itertools
 import logging
 
 
@@ -30,12 +31,19 @@ def parse_densenet_params(args):
             num_layers = read_list(args['network']['num_layers'])
             if "kernels" in args['network']:
                 kernels = read_list(args['network']['kernels'])
-                if len(kernels) == 1:
-                    args['network']['kernels'] = kernels * len(num_layers)
+                if len(kernels) == 1 :
+                    args['network']['kernels'] = [kernels * n for n in num_layers]
                 else:
-                    assert len(kernels) == len(num_layers), "the number of kernel sizes must match that of the network layers"
-                    args["network"]["kernels"] = kernels
+                    assert len(kernels) == sum(num_layers), "The number of kernel sizes must match that of the network layers"
+                    batched_kernels = []
+                    left = 0 
+                    for nn in num_layers:
+                        batched_kernels.append(kernels[left:left+nn])
+                        left += nn
+                    args["network"]["kernels"] = batched_kernels
             args['network']['num_layers'] = num_layers
+    # print(args['network']['num_layers'])
+    # print(args['network']['kernels'])
     return args
 
 

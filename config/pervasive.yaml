@@ -1,16 +1,18 @@
-model : pervasive
 modelname:  pervasive
+
+model : pervasive
 start_from : 0
 start_from_best : 1
-multi_gpus : 0
 
 encoder:
+  type : none
   input_dim : 128
   input_dropout : .2
   encode_position : 0
   encode_length : 0
  
 decoder:
+  type : none
   input_dim : 128
   input_dropout : .2
   encode_position : 0
@@ -24,40 +26,42 @@ network :
   type: densenet
   growth_rate : 32
   num_layers: 20
-  half_inputs : 1
+  divide_channels : 2
+  normalize_channels : 0
   kernels : 3
   dilation : 1
   groups : 1
-  layer_type: 1
+  layer_type: regular
+  transition_type : 1
   bias : 0
   gated : 0
   weigth_norm : 0
   init_weights: 0
-  conv_dropout : 0
-
+  conv_dropout : 0.2
+  efficient : 1
 
 aggregator:
-  project_context : none
   mode : max
-  pool_kernel : 3
-  pool_width : 8
-  attend_kernel : 3
-  pos_emb_dim : 64
+  first_aggregator : max
+  attention_dropout : .2
+  scale_ctx : 1
+  nonlin : none 
+  mapping: linear
+  map_embeddings : none
 
 
 loss:
   version : ml  # tok , seq
-  combine_loss : 0  # if 1: Tok-Seq
-  normalize_batch : 1
+  normalize : ntokens
   penalize_confidence : 0
 
 data:
   src : de
   trg : en
-  dir : data/IWSLT14
-  batch_size: 32
-  max_src_length : 45
-  max_trg_length : 47
+  dir : data/iwslt
+  batch_size: 16
+  max_src_length : 70
+  max_trg_length : 70
 
 optim: 
   reset : 1
@@ -93,9 +97,9 @@ optim:
 track :
   batch_size : 32
   split : val
-  max_length: 50
+  max_length: 80
   max_length_a : 0
-  max_length_b : 50
+  max_length_b : 80
   log_every : 200
   checkpoint : 5000
   beam_size : 1

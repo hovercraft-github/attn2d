@@ -5,6 +5,13 @@ import torch.nn.functional as F
 from .conv1d import MaskedConv1d
 
 
+def read_list(param):
+    """ Parse list of integers """
+    param = str(param)
+    param = [int(p) for p in param.split(',')]
+    return param
+
+
 def make_positions(tensor, padding_idx, left_pad):
     len = tensor.size(1)
     max_pos = padding_idx + 1 + len
@@ -49,6 +56,7 @@ class Embedding(nn.Module):
         self.init_std = params.get('init_std', .01)
         self.zero_pad = params.get('zero_pad', 0)
         self.padding_idx = padding_idx
+        # self.normalize = params.get('normalize', 0)
         self.label_embedding = nn.Embedding(
             vocab_size,
             self.dimension,
@@ -77,6 +85,10 @@ class Embedding(nn.Module):
             self.pos_embedding.weight.data.normal_(0, std)
         if self.encode_length:
             self.length_embedding.weight.data.normal_(0, std)
+        # if self.normalize:
+            # W = self.label_embedding.weight
+            # norms = torch.norm(W, p=2, dim=1, keepdim=True).expand_as(W)
+            # self.label_embedding.weight = W.div(norms)
 
     def forward(self, data):
         labels = data["labels"]
@@ -101,7 +113,6 @@ class Embedding(nn.Module):
         emb = self.label_embedding(tok)
         if self.encode_position:
             position = torch.ones((tok.size(0), 1)).type_as(tok) * position
-            # print('position:', position)
             pos = self.pos_embedding.map(position)
             emb += pos
         if self.encode_length:
@@ -128,10 +139,15 @@ class ConvEmbedding(nn.Module):
         self.encode_length = params['encode_length']
         self.encode_position = params['encode_position']
         self.dropout = params['input_dropout']
+        self.init_std = params.get('init_std', .01)
         self.nlayers = params['num_layers']
-        kernel = params['kernel']
-        self.kernel_size = kernel
-        pad = (kernel - 1) // 2
+        kernels = read_list(params['kernels'])
+        out_channels = read_list(params['channels'])
+        assert len(out_channels) == self.nlayers, "Number of channels should match the depth"
+        assert len(kernels) == self.nlayers, "Number of kernel sizes should match the depth"
+        out_channels.insert(0, self.dimension)
+        print('channels:', out_channels, "kernels:", kernels)
+        self.kernel_size = max(kernels)
         self.label_embedding = nn.Embedding(
             vocab_size,
             self.dimension,
@@ -145,17 +161,21 @@ class ConvEmbedding(nn.Module):
         else:
             conv = nn.Conv1d
 
+        print('1d conv on embeddings:')
         for l in range(self.nlayers):
+            kernel = kernels[l]
+            pad = (kernel - 1) // 2
             self.conv.add_module("conv%d" % l,
-                                 conv(self.dimension,
-                                      self.dimension,
+                                 conv(out_channels[l],
+                                      out_channels[l+1],
                                       kernel,
                                       padding=pad,
                                       bias=False))
+            print('%d > %d' % (out_channels[l], out_channels[l+1]))
+        self.dimension = out_channels[-1]
 
     def init_weights(self):
-        std = .01
-        self.label_embedding.weight.data.normal_(0, std)
+        self.label_embedding.weight.data.normal_(0, self.init_std)
 
     def forward(self, data):
         labels = data["labels"]

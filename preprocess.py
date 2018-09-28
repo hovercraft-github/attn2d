@@ -318,11 +318,31 @@ if __name__ == "__main__":
         params.max_length = 200
         params.batch_size = 32
 
+    if params.data_dir == 'envi':
+        params.src = "en"
+        params.trg = "vi"
+        params.max_words_src = 10000
+        params.max_words_trg = 10000
+        params.shuffle_sort = True
+        params.shuffle_sort_eval = True
+        params.max_length = 200
+        params.batch_size = 32
+
+    if params.data_dir == 'envi_word':
+        params.src = "en"
+        params.trg = "vi"
+        params.max_words_src = 17700
+        params.max_words_trg = 17000
+        params.shuffle_sort = True
+        params.shuffle_sort_eval = True
+        params.max_length = 120
+        params.batch_size = 32
+
     if params.data_dir == 'wmt_en_de':
         params.src = "en"
         params.trg = "de"
-        params.max_words_src = 32000
-        params.max_words_trg = 32000
+        params.max_words_src = 32800
+        params.max_words_trg = 32800
         params.shuffle_sort = True
         params.shuffle_sort_eval = True
         params.max_length = 200
