@@ -7,9 +7,7 @@ from .conv1d import MaskedConv1d
 
 def read_list(param):
     """ Parse list of integers """
-    param = str(param)
-    param = [int(p) for p in param.split(',')]
-    return param
+    return [int(p) for p in str(param).split(',')]
 
 
 def make_positions(tensor, padding_idx, left_pad):
@@ -30,13 +28,13 @@ def make_positions(tensor, padding_idx, left_pad):
 
 
 class PosEmbedding(nn.Embedding):
+    # CHECK
     def __init__(self, max_length, position_dim, pad_left=False):
         super(PosEmbedding, self).__init__(max_length, position_dim, 0)
         self.pad_left = pad_left
 
     def forward(self, labels):
         positions = make_positions(labels, self.padding_idx, self.pad_left)
-        # print('Positions:', positions)
         return super().forward(positions)
 
     def map(self, inputs):
@@ -131,6 +129,11 @@ class Embedding(nn.Module):
 
 
 class ConvEmbedding(nn.Module):
+    """
+    A 1d convolutional network on top of the lookup embeddings.
+    TODO : à la ELMO, learnable combination of the layers activations
+    TODO : add skip connections
+    """
     def __init__(self, params,
                  vocab_size, padding_idx,
                  is_target=False):
@@ -147,7 +150,9 @@ class ConvEmbedding(nn.Module):
         assert len(kernels) == self.nlayers, "Number of kernel sizes should match the depth"
         out_channels.insert(0, self.dimension)
         print('channels:', out_channels, "kernels:", kernels)
-        self.kernel_size = max(kernels)
+        self.kernel_size = max(kernels)  
+        #FIXME often times the same kernel size! 
+        #TODO if not, buffer size different for each conv
         self.label_embedding = nn.Embedding(
             vocab_size,
             self.dimension,
@@ -161,7 +166,6 @@ class ConvEmbedding(nn.Module):
         else:
             conv = nn.Conv1d
 
-        print('1d conv on embeddings:')
         for l in range(self.nlayers):
             kernel = kernels[l]
             pad = (kernel - 1) // 2

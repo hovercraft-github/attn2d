@@ -86,6 +86,7 @@ class NAG(optim.Optimizer):
         Arguments:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
+        source: fairseq/optim/nag.py
         """
         loss = None
         if closure is not None:
@@ -121,6 +122,9 @@ class NAG(optim.Optimizer):
         return loss
 
 class Optimizer(object):
+    """
+    Wrapper for the optimizer (fairseq style)
+    """
     def __init__(self, opt, model):
         super().__init__()
         #  rmsprop | sgd | sgdmom | adagrad | adam
@@ -173,9 +177,6 @@ class Optimizer(object):
             raise ValueError('Unknown optimizer % s' % ref)
 
         self.optimizer = optimizer
-        self.grad_norm_max = float(opt['grad_clip'])
-        self.grad_norm_type = 2
-
 
     def get_lr(self):
         """Return the current learning rate."""
@@ -191,13 +192,7 @@ class Optimizer(object):
         return self.optimizer.state_dict()
 
     def load(self, state_dict):
-        """Load an optimizer state dict.
-
-        In general we should prefer the configuration of the existing optimizer
-        instance (e.g., learning rate) over that found in the state_dict. This
-        allows us to resume training from a checkpoint using a new set of
-        optimizer args.
-        """
+        """Load an optimizer state dict. """
         self.optimizer.load_state_dict(state_dict)
 
     def step(self, closure=None):
@@ -216,65 +211,7 @@ class Optimizer(object):
                 for pp in p['params']:
                     pp.requires_grad = True
 
-    def clip_gradient_nn(self):
-        ""
-        params = self.optimizer.params()
-        return nn.utils.clip_grad_norm_(params, self.grad_norm_max, self.grad_norm_type)
-
-    def clamp_gradient(self):
-        norm_type = self.grad_norm_type
-        max_norm = self.grad_norm_max
-        if norm_type == float('inf'):
-            total_norm = max(p.grad.data.abs().max()
-                             for group in self.optimizer.param_groups
-                             for p in group['params'])
-        else:
-            total_norm = 0.0
-            for group in self.optimizer.param_groups:
-                for p in group['params']:
-                    try:
-                        param_norm = p.grad.data.norm(norm_type)
-                        total_norm += param_norm ** norm_type
-                    except:
-                        pass
-            total_norm = total_norm ** (1. / norm_type)
-        for group in self.optimizer.param_groups:
-            for p in group['params']:
-                try:
-                    p.grad.data = p.grad.data.clamp(-self.grad_norm_max,
-                                                    self.grad_norm_max)
-                except:
-                    pass
-        return total_norm.data.item()
-
-    def clip_gradient(self):
-        norm_type = self.grad_norm_type
-        max_norm = self.grad_norm_max
-        if norm_type == float('inf'):
-            total_norm = max(p.grad.data.abs().max()
-                             for group in self.optimizer.param_groups
-                             for p in group['params'])
-        else:
-            total_norm = 0.0
-            for group in self.optimizer.param_groups:
-                for p in group['params']:
-                    try:
-                        param_norm = p.grad.data.norm(norm_type)
-                        total_norm += param_norm ** norm_type
-                    except:
-                        pass
-            total_norm = total_norm ** (1. / norm_type)
-        clip_coef = max_norm / (total_norm + 1e-6)
-        if clip_coef < 1:
-            for group in self.optimizer.param_groups:
-                for p in group['params']:
-                    try:
-                        p.grad.data.mul_(clip_coef)
-                    except:
-                        pass
-        return total_norm.data.item()
-
-
+        
 class InverseSquareRoot(lr_scheduler._LRScheduler):
     """
     Follow the schedule of Vaswani et al. 2017

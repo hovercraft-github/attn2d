@@ -51,7 +51,7 @@ def train(params):
     if trainer.lr_patient:
         trainer.update_params()
     while True:
-        # update parameters: lr, alpha ...
+        # update parameters: lr, ...
         if not trainer.lr_patient:
             trainer.update_params()
         torch.cuda.synchronize()
@@ -60,7 +60,7 @@ def train(params):
         total_ntokens = 0
         total_nseqs = 0
         start = time.time()
-        # Default num_batches=1, untested cumulative loss
+        # Default num_batches=1
         for _ in range(params['optim']['num_batches']):
             data_src, order = src_loader.get_src_batch('train')
             data_trg = trg_loader.get_trg_batch('train', order)

@@ -10,9 +10,7 @@ import logging
 
 def read_list(param):
     """ Parse list of integers """
-    param = str(param)
-    param = [int(p) for p in param.split(',')]
-    return param
+    return [int(p) for p in str(param).split(',')]
 
 
 def update(d, u):

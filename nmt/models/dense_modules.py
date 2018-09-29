@@ -183,7 +183,7 @@ class _MainDenseLayer(nn.Module):
 
 class DenseLayer(_MainDenseLayer):
     """
-    BN > ReLU > Conv(k=1) > BN > ReLU > Conv(k=3)
+    BN > ReLU > Conv(1) > BN > ReLU > Conv(k)
     """
     def __init__(self,
                  num_input_features,
@@ -205,7 +205,7 @@ class DenseLayer(_MainDenseLayer):
 
 class DenseLayer_midDP(_MainDenseLayer):
     """
-    BN > ReLU > Conv(k=1) > Dropout > BN > ReLU > Conv(k=3)
+    BN > ReLU > Conv(1) > Dropout > BN > ReLU > Conv(k)
     """
     def __init__(self,
                  num_input_features,
@@ -228,7 +228,8 @@ class DenseLayer_midDP(_MainDenseLayer):
 
 class DenseLayer_noBN(_MainDenseLayer):
     """
-    ReLU > Conv(k=1) > ReLU > Conv(k=3)
+    ReLU > Conv(1) > ReLU > Conv(k)
+    #TODO: check activ' var
     """
     def __init__(self,
                  num_input_features,
@@ -248,9 +249,9 @@ class DenseLayer_noBN(_MainDenseLayer):
 
 class DenseLayer_Dil(_MainDenseLayer):
     """
-    BN > ReLU > Conv(k=1)
-    > BN > ReLU > Conv(k=3)
-    > BN > ReLU > Conv(k=3, dilated)
+    BN > ReLU > Conv(1)
+    > BN > ReLU > Conv(k)
+    > BN > ReLU > Conv(k, dilated)
 
     """
     def __init__(self,
