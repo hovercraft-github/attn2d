@@ -19,6 +19,7 @@ def train(params):
     devices = {}
     for i in range(ngp):
         devices[i] = torch.cuda.get_device_name(i)
+        print(devices[i])
 
     from nmt.loader import ReadData
     import nmt.models.setup as ms

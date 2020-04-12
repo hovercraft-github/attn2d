@@ -11,3 +11,5 @@ config/*.yaml
 *.infos
 *raw*
 run.sh
+.vscode
+*.code-workspace
