@@ -40,6 +40,32 @@ class PosEmbedding(nn.Embedding):
     def map(self, inputs):
         return super(PosEmbedding, self).forward(inputs)
 
+class NullEmbedding(nn.Module):
+    def __init__(self, params,
+                 vocab_size, padding_idx,
+                 pad_left=False):
+
+        nn.Module.__init__(self)
+        self.dimension = params['input_dim']
+        self.encode_length = params['encode_length']
+        self.encode_position = params['encode_position']
+        self.dropout = params['input_dropout']
+        self.init_std = params.get('init_std', .01)
+        self.zero_pad = params.get('zero_pad', 0)
+        self.padding_idx = padding_idx
+
+    def init_weights(self):
+        pass
+
+    def forward(self, data):
+        labels = data["labels"]
+        return labels
+
+    def single_token(self, tok, position, length=None):
+        return tok
+
+    def reset_buffers(self):
+        pass
 
 class Embedding(nn.Module):
     def __init__(self, params,

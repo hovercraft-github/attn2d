@@ -8,7 +8,10 @@ def ReadData(params, jobname):
     dataparams = {'h5': "%s/%s.%s" % (ddir, src, "h5"),
                   'infos': "%s/%s.%s" % (ddir, src, "infos"),
                   'batch_size': params['batch_size'],
-                  'max_length': params['max_src_length']
+                  'max_length': params['max_src_length'],
+                  'src': params['src']
+                  #'type': params['type'],
+                  #'input_dim': params['input_dim']
                  }
     src_loader = textDataLoader(dataparams, jobname=jobname)
 

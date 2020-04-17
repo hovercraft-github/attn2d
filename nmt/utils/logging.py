@@ -4,8 +4,7 @@ _ENDC = '\033[0m'
 GREEN = '\x1b[32m'
 YELLOW = '\x1b[33m'
 
-
-def print_sampled(source, gt, pred, score=None):
+def print_sampled_src(source, gt, pred, score=None):
     """
     Print translated sequences
     """
@@ -13,6 +12,15 @@ def print_sampled(source, gt, pred, score=None):
     gt = " ".join(gt.split()).encode('utf-8')
     pred = " ".join(pred.split()).encode('utf-8')
     print("SRC: ", source, GREEN, '\nTRG:', gt, YELLOW, "\nHYP: ", pred, _ENDC)
+    return pred
+
+def print_sampled(gt, pred, score=None):
+    """
+    Print translated sequences
+    """
+    #gt = " ".join(gt.split()).encode('utf-8')
+    #pred = " ".join(pred.split()).encode('utf-8')
+    print(GREEN, '\nTRG:', gt, YELLOW, "\nHYP: ", pred, _ENDC)
     return pred
 
 

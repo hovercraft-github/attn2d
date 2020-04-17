@@ -207,10 +207,10 @@ def evaluate_model(job_name, trainer, src_loader, trg_loader, eval_kwargs):
                 # init and forward decoder combined
                 decoder_logit = model.decoder(source, data_trg)
                 losses, stats = crit(decoder_logit, data_trg['out_labels'])
-            batch_preds, _ = model.sample(source, eval_kwargs)
+            batch_preds, _ = model.sample(source, None, eval_kwargs)
         else:
             losses, stats = crit(model(data_src, data_trg), data_trg['out_labels'])
-            batch_preds, _ = model.sample(data_src, eval_kwargs)
+            batch_preds, _ = model.sample(data_src, None, eval_kwargs)
 
         loss_sum += losses['final'].data.item()
         ml_loss_sum += losses['ml'].data.item()
@@ -229,23 +229,25 @@ def evaluate_model(job_name, trainer, src_loader, trg_loader, eval_kwargs):
                                          eos=trg_loader.eos,
                                          bos=trg_loader.bos)
         # Do the same for gold sentences
-        sent_source = decode_sequence(src_loader.get_vocab(),
-                                      data_src['labels'],
-                                      eos=src_loader.eos,
-                                      bos=src_loader.bos)
+        # sent_source = decode_sequence(src_loader.get_vocab(),
+        #                               data_src['labels'],
+        #                               eos=src_loader.eos,
+        #                               bos=src_loader.bos)
         sent_gold = decode_sequence(trg_loader.get_vocab(),
                                     data_trg['out_labels'],
                                     eos=trg_loader.eos,
                                     bos=trg_loader.bos)
         if not verbose:
-            verb = not (n % 1000)
+            verb = not (n % 200)
         else:
             verb = verbose
-        for (sl, l, gl) in zip(sent_source, sent_preds, sent_gold):
+        #for (sl, l, gl) in zip(sent_source, sent_preds, sent_gold):
+        for (l, gl) in zip(sent_preds, sent_gold):
             preds.append(l)
             ground_truths.append(gl)
             if verb:
-                lg.print_sampled(sl, gl, l)
+                #lg.print_sampled(sl, gl, l)
+                lg.print_sampled(gl, l)
         if max_samples == -1:
             ix1 = data_src['bounds']['it_max']
         else:
@@ -309,32 +311,33 @@ def sample_model(job_name, model, src_loader, trg_loader, eval_kwargs):
                                          bos=trg_loader.bos,
                                          remove_bpe=remove_bpe)
         # Do the same for gold sentences
-        sent_source = decode_sequence(src_loader.get_vocab(),
-                                      data_src['labels'],
-                                      eos=src_loader.eos,
-                                      bos=src_loader.bos,
-                                      remove_bpe=remove_bpe)
+        # sent_source = decode_sequence(src_loader.get_vocab(),
+        #                               data_src['labels'],
+        #                               eos=src_loader.eos,
+        #                               bos=src_loader.bos,
+        #                               remove_bpe=remove_bpe)
         sent_gold = decode_sequence(trg_loader.get_vocab(),
                                     data_trg['out_labels'],
                                     eos=trg_loader.eos,
                                     bos=trg_loader.bos,
                                     remove_bpe=remove_bpe)
         if not verbose:
-            verb = not (n % 1000)
+            verb = not (n % 200)
         else:
             verb = verbose
-        for (sl, l, gl) in zip(sent_source, sent_preds, sent_gold):
+        #for (sl, l, gl) in zip(sent_source, sent_preds, sent_gold):
+        for (l, gl) in zip(sent_preds, sent_gold):
             preds.append(l)
             ground_truths.append(gl)
             if verb:
-                lg.print_sampled(sl, gl, l)
+                lg.print_sampled(gl, l)
         ix1 = data_src['bounds']['it_max']
         # ix1 = 20
         if data_src['bounds']['wrapped']:
             break
         if n >= ix1:
             break
-        del sent_source, sent_preds, sent_gold, batch_preds
+        del sent_preds, sent_gold, batch_preds
     logger.warn('Sampled %d sentences in %.2f s', len(preds), time.time() - start)
     bleu_moses, _ = corpus_bleu(preds, ground_truths)
     return preds, bleu_moses
@@ -406,12 +409,12 @@ def track_model(job_name, model, src_loader, trg_loader, eval_kwargs):
                                          bos=trg_loader.bos,
                                          remove_bpe=False)
         # Do the same for gold sentences
-        sent_source = decode_sequence(src_loader.get_vocab(),
-                                      data_src['labels'].data.cpu().numpy(),
-                                      eos=src_loader.eos,
-                                      bos=src_loader.bos,
-                                      remove_bpe=False)
-        source.append(sent_source)
+        # sent_source = decode_sequence(src_loader.get_vocab(),
+        #                               data_src['labels'].data.cpu().numpy(),
+        #                               eos=src_loader.eos,
+        #                               bos=src_loader.bos,
+        #                               remove_bpe=False)
+        #source.append(sent_source)
         sent_gold = decode_sequence(trg_loader.get_vocab(),
                                     data_trg['out_labels'].data.cpu().numpy(),
                                     eos=trg_loader.eos,
@@ -421,11 +424,12 @@ def track_model(job_name, model, src_loader, trg_loader, eval_kwargs):
             verb = not (n % 300)
         else:
             verb = verbose
-        for (sl, l, gl) in zip(sent_source, sent_preds, sent_gold):
+        #for (sl, l, gl) in zip(sent_source, sent_preds, sent_gold):
+        for (l, gl) in zip(sent_preds, sent_gold):
             preds.append(l)
             ground_truths.append(gl)
             if verb:
-                lg.print_sampled(sl, gl, l)
+                lg.print_sampled(gl, l)
         if max_samples == -1:
             ix1 = data_src['bounds']['it_max']
         else:

@@ -64,7 +64,7 @@ def decode_sequence(ix_to_word, seq, eos, bos, remove_bpe=0):
                     txt.append(ix_to_word[ix])
             else:
                 break
-        sent = " ".join(txt)
+        sent = "".join(txt)
         if remove_bpe:
             sent = sent.replace('@@ ', '')
         out.append(sent)

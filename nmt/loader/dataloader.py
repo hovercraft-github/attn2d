@@ -11,14 +11,21 @@ class textDataLoader(object):
     """
     def __init__(self, params, jobname):
         self.logger = logging.getLogger(jobname)
-        infos = pload(params['infos'])
-        self.ix_to_word = infos['itow']
-        self.vocab_size = len(self.ix_to_word)
+        self.src = params.get('src', None)
+        if self.src == 'voice':
+            self.ix_to_word = None
+            self.vocab_size = 0
+        else:
+            infos = pload(params['infos'])
+            self.ix_to_word = infos['itow']
+            self.vocab_size = len(self.ix_to_word)
         self.ref = params["h5"]
         self.logger.info('Loading h5 file: %s' % params['h5'])
         self.logger.info('...Vocab size is %d ' % self.vocab_size)
         self.h5_file = h5py.File(params['h5'])
         raw = params.get('raw', False)
+        self.label_dimensions = 2
+        self.label_depth = 1
         print('Raw:', raw)
         if not raw:
             self.max_indices = {
@@ -26,6 +33,9 @@ class textDataLoader(object):
                 'val': len(self.h5_file["labels_val"]),
                 'test': len(self.h5_file["labels_test"])
                 }
+            self.label_dimensions = len(self.h5_file["labels_train"].shape)
+            if self.label_dimensions >= 3:
+                self.label_depth = self.h5_file["labels_train"].shape[2]
             self.logger.info('...Train:  %d | Dev: %d | Test: %d',
                              self.max_indices['train'],
                              self.max_indices['val'],
@@ -44,13 +54,19 @@ class textDataLoader(object):
         self.batch_size = params['batch_size']
         self.seq_length = params['max_length']
         self.logger.warning('...Reading sequences up to %d', self.seq_length)
-        word_to_ix = {w: ix for ix, w in self.ix_to_word.items()}
-        self.pad = word_to_ix['<PAD>']
-        self.unk = word_to_ix['<UNK>']
-        try:
-            self.eos = word_to_ix['<EOS>']
-            self.bos = word_to_ix['<BOS>']
-        except:
+        if not self.ix_to_word == None:
+            word_to_ix = {w: ix for ix, w in self.ix_to_word.items()}
+            self.pad = word_to_ix['<PAD>']
+            self.unk = word_to_ix['<UNK>']
+            try:
+                self.eos = word_to_ix['<EOS>']
+                self.bos = word_to_ix['<BOS>']
+            except:
+                self.eos = self.pad
+                self.bos = self.pad
+        else:
+            self.pad = 0
+            self.unk = 1
             self.eos = self.pad
             self.bos = self.pad
 
@@ -65,7 +81,10 @@ class textDataLoader(object):
 
     def get_src_batch(self, split, batch_size=None):
         batch_size = batch_size or self.batch_size
-        label_batch = np.zeros([batch_size, self.seq_length], dtype='int')
+        if self.src == 'voice':
+            label_batch = np.zeros([batch_size, self.seq_length, self.label_depth], dtype='float32')
+        else:
+            label_batch = np.zeros([batch_size, self.seq_length], dtype='int')
         len_batch = []
         pointer = 'labels_%s' % split
         len_pointer = 'lengths_%s' % split

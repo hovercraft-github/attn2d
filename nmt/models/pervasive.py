@@ -13,7 +13,7 @@ from .efficient_densenet import Efficient_DenseNet
 from .log_efficient_densenet import Log_Efficient_DenseNet
 
 from .aggregator import Aggregator
-from .embedding import Embedding, ConvEmbedding
+from .embedding import Embedding, ConvEmbedding, NullEmbedding
 from .beam_search import Beam
 
 
@@ -55,6 +55,12 @@ class Pervasive(nn.Module):
                 )
         elif params['encoder']['type'] == "conv":
             self.src_embedding = ConvEmbedding(
+                params['encoder'],
+                src_vocab_size,
+                padding_idx=self.padding_idx
+                )
+        elif params['encoder']['type'] == None:
+            self.src_embedding = NullEmbedding(
                 params['encoder'],
                 src_vocab_size,
                 padding_idx=self.padding_idx
