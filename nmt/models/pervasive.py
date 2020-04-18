@@ -65,6 +65,8 @@ class Pervasive(nn.Module):
                 src_vocab_size,
                 padding_idx=self.padding_idx
                 )
+        self.logger.info('Src embeding num. model params: %d', sum(p.data.numel()
+                                             for p in self.src_embedding.parameters()))
 
         self.trg_embedding = Embedding(
             params['decoder'],
@@ -72,6 +74,8 @@ class Pervasive(nn.Module):
             padding_idx=self.padding_idx,
             pad_left=True
             )
+        self.logger.info('Trgt embeding num. model params: %d', sum(p.data.numel()
+                                             for p in self.trg_embedding.parameters()))
 
         if self.merge_mode == 'concat':
             self.input_channels = self.src_embedding.dimension + \

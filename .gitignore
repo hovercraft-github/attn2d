@@ -4,7 +4,6 @@ data
 scripts/mosesdecoder
 scripts/orig
 scripts/*.py
-config/*.yaml
 **/__pycache__
 *.py[cod]
 *.h5 

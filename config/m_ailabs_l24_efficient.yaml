@@ -1,0 +1,53 @@
+modelname: m_ailabs_l24_efficient
+default_config : config/pervasive.yaml
+
+encoder:
+  type : null
+  input_dim : 20
+  input_dropout : .2
+  encode_position : 0
+  encode_length : 0
+ 
+decoder:
+  type : none
+  input_dim : 20
+  input_dropout : .2
+  encode_position : 0
+  encode_length : 0
+  tie_target_weights : 0
+  copy_source_weights : 0
+  prediction_dropout : .2
+
+network :
+  type: efficient-densenet
+  growth_rate : 32
+  num_layers : 12
+  kernels: 3
+  conv_dropout : .2
+
+data:
+  src : voice
+  trg : ru
+  dir : data/m_ailabs
+  batch_size: 16
+  max_src_length : 70
+  max_trg_length : 70
+
+
+track: 
+  batch_size : 4
+  checkpoint : 4000
+  max_length_a : 0
+  max_length_b : 80
+
+optim: 
+  seed : 3
+  max_epochs : 16
+  LR:
+      base : 0.0005
+      decay_start : 0
+      decay_every: 4
+      decay_rate : 0.8
+      patience : 3
+      schedule: early-stopping
+      criterion : loss

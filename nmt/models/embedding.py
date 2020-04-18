@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .conv1d import MaskedConv1d
+from nmt.utils import to_contiguous
 
 
 def read_list(param):
@@ -58,11 +59,20 @@ class NullEmbedding(nn.Module):
         pass
 
     def forward(self, data):
-        labels = data["labels"]
-        return labels
+        emb = data["labels"]
+        if self.dropout:
+            emb = F.dropout(emb,
+                            p=self.dropout,
+                            training=self.training)
+        return to_contiguous(emb)
 
     def single_token(self, tok, position, length=None):
-        return tok
+        emb = tok
+        if self.dropout:
+            emb = F.dropout(emb,
+                            p=self.dropout,
+                            training=self.training)
+        return to_contiguous(emb)
 
     def reset_buffers(self):
         pass
