@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch.autograd import Variable
+from .embedding import NullEmbedding
 
 """
 An (bi-)LSTM/GRU encoder
@@ -10,11 +11,12 @@ class Encoder(nn.Module):
     def __init__(self, params, vocab_size):
         nn.Module.__init__(self)
         # input
+        self.emd_type = params.get('type', None)
         self.input_dim = params['input_dim']
         self.vocab_size = vocab_size
         self.pad_token = 0
         # cell
-        self.bidirectional = params['bidirectional']
+        self.bidirectional = bool(params['bidirectional'])
         self.nd = 2 if self.bidirectional else 1
         self.cell_type = params['cell_type'].upper()
         self.nlayers = params['num_layers']
@@ -24,12 +26,15 @@ class Encoder(nn.Module):
         self.hidden_dim = self.size // self.nd
 
         # layers
-        self.embedding = nn.Embedding(
-            self.vocab_size,
-            self.input_dim,
-            self.pad_token,
-            scale_grad_by_freq=bool(params['scale_grad_by_freq'])
-        )
+        if self.emd_type == 'standard':
+            self.embedding = nn.Embedding(
+                self.vocab_size,
+                self.input_dim,
+                self.pad_token,
+                scale_grad_by_freq=bool(params['scale_grad_by_freq'])
+            )
+        else:
+            self.embedding = NullEmbedding({}, self.vocab_size, self.pad_token)
 
         self.input_dropout = nn.Dropout(params['input_dropout'])
         if params['cell_dropout'] and self.nlayers == 1:
@@ -48,10 +53,11 @@ class Encoder(nn.Module):
 
     def init_weights(self):
         """Initialize weights."""
-        initdev = 0.01
-        self.embedding.weight.data.normal_(0.0, initdev)
-        self.embedding.weight.data.normal_(0.0, initdev)
-        # FIXME add the option of initializing with loaded weights and freeze
+        if self.emd_type == 'standard':
+            initdev = 0.01
+            self.embedding.weight.data.normal_(0.0, initdev)
+            self.embedding.weight.data.normal_(0.0, initdev)
+            # FIXME add the option of initializing with loaded weights and freeze
 
     def init_state(self, batch_size):
         """Get cell states and hidden states."""

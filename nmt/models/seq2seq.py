@@ -42,7 +42,7 @@ class Seq2Seq(nn.Module):
         logits = self.decoder(source, data_trg)
         return logits
 
-    def sample(self, source, kwargs={}):
+    def sample(self, source, scorer, kwargs={}):
         """
         Sample given source with keys:
             state - ctx - emb

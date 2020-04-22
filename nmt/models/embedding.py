@@ -47,32 +47,36 @@ class NullEmbedding(nn.Module):
                  pad_left=False):
 
         nn.Module.__init__(self)
-        self.dimension = params['input_dim']
-        self.encode_length = params['encode_length']
-        self.encode_position = params['encode_position']
-        self.dropout = params['input_dropout']
-        self.init_std = params.get('init_std', .01)
-        self.zero_pad = params.get('zero_pad', 0)
-        self.padding_idx = padding_idx
+        #self.dimension = params['input_dim']
+        #self.encode_length = params['encode_length']
+        #self.encode_position = params['encode_position']
+        self.dropout = params.get('input_dropout', None)
+        #self.init_std = params.get('init_std', .01)
+        #self.zero_pad = params.get('zero_pad', 0)
+        #self.padding_idx = padding_idx
 
     def init_weights(self):
         pass
 
     def forward(self, data):
-        emb = data["labels"]
-        if self.dropout:
+        if isinstance(data, dict):
+            #if "labels" in data:
+            emb = data["labels"]
+        else:
+            emb = data
+        if not self.dropout == None:
             emb = F.dropout(emb,
                             p=self.dropout,
                             training=self.training)
-        return to_contiguous(emb)
+        return emb
 
     def single_token(self, tok, position, length=None):
         emb = tok
-        if self.dropout:
+        if not self.dropout == None:
             emb = F.dropout(emb,
                             p=self.dropout,
                             training=self.training)
-        return to_contiguous(emb)
+        return emb
 
     def reset_buffers(self):
         pass

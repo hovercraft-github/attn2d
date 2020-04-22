@@ -339,8 +339,13 @@ class CondDecoder(nn.Module):
                         torch.mul((input ==
                                    self.eos_token
                                    ).type_as(logits), -1), 1)
-                if unfinished.sum().data[0] == 0:
-                    break
+                smm = unfinished.sum()
+                if torch.is_tensor(smm) and len(smm.shape) >= 1:
+                    if smm.data[0] == 0:
+                        break
+                else:
+                    if smm == 0:
+                        break
 
         seq = torch.cat(seq, 1).data.cpu().numpy()
         return seq, scores

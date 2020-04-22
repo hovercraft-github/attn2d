@@ -24,6 +24,7 @@ network :
   num_layers : 12
   kernels: 3
   conv_dropout : .2
+  divide_channels : 1
 
 data:
   src : voice
