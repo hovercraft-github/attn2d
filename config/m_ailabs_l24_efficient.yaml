@@ -34,6 +34,8 @@ data:
   max_src_length : 70
   max_trg_length : 70
 
+loss:
+  version : ctc  # tok , seq ? ctc, ml, smooth_ml
 
 track: 
   batch_size : 4

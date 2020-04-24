@@ -33,7 +33,9 @@ def define_loss(jobname, params, trg_dict):
     Define training criterion
     """
     ver = params['version'].lower()
-    if ver == 'ml':
+    if ver == 'ctc':
+        crit = loss.CTCCriterion(jobname, params)
+    elif ver == 'ml':
         crit = loss.MLCriterion(jobname, params)
     elif ver == 'smooth_ml':
         crit = loss.SmoothMLCriterion(jobname, params)

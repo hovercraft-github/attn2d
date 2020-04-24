@@ -38,7 +38,51 @@ class SmoothMLCriterion(nn.Module):
         return {"final": output, "ml": ml_loss}, {}
 
 
+class CTCCriterion(nn.Module):
+    """
+    CTC loss
+    """
+    def __init__(self, job_name, params):
+        super().__init__()
+        self.logger = logging.getLogger(job_name)
+        self.th_mask = params.get('mask_threshold', 1)  # both pad and unk
+        self.version = 'ctc'
+        self.ctc_loss = nn.CTCLoss(blank=0, zero_infinity=False, reduction='none').cuda()
+        # for param in self.parameters():
+        #     param.requires_grad = False
 
+    def log(self):
+        self.logger.info('CTC loss')
+
+    def forward(self, logp, target):
+        """
+        logp : the decoder logits (N, seq_length, V)
+        target : the ground truth labels (N, seq_length)
+        """
+        batch_size = logp.size(0)
+        seq_length = logp.size(1)
+        #vocab = logp.size(2)
+        labels = to_contiguous(target)
+        labels = labels[:, :seq_length]
+        y_lengths = (labels.size(1) - (labels <= self.th_mask).sum(dim=1)).int().cpu()
+        labels = to_contiguous(labels).view(-1)
+        labels = labels[(labels > self.th_mask).nonzero()].int()
+        labels = labels.squeeze().cpu()
+
+        x_lengths = torch.full((batch_size,), seq_length, dtype=torch.int32).cpu()  # Length of inputs
+        logp = to_contiguous(logp).permute(1, 0, 2)
+
+        output = self.ctc_loss(logp, labels, x_lengths, y_lengths)
+
+        output = torch.sum(output)
+        output /= batch_size
+
+        if torch.isinf(output).any() or torch.isnan(output).any():
+            output.data.copy_(torch.tensor(1000.0).data)
+            # output_ = torch.zeros([1] * 0) + 1000
+            # output_.requires_grad = True
+            # output_.grad_fn = output.grad_fn
+        return {"final": output, "ml": output}, {}
 
 class MLCriterion(nn.Module):
     """

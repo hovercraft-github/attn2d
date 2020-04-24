@@ -5,32 +5,32 @@ start_from : 0
 start_from_best : 1
 
 encoder:
-  type : lookup
+  type : null
   input_dim : 20
   input_dropout : .2
   encode_position : 0
   encode_length : 0
   max_length : 70
   cell_type : lstm
-  cell_dim : 256
+  cell_dim : 64 #256
   cell_dropout : .2
-  bidirectional : 1
+  bidirectional : 0
   num_layers : 1
   parallel : 0
   scale_grad_by_freq : 0
   positional : 0
     
 decoder:
-  type: lookup
+  type: lookup # none lookup
   tie_target_weights : 0
   copy_source_weights : 0
-  input_dim : 20
+  input_dim : 64
   input_dropout : .2
   encode_position : 0
   encode_length : 0
   max_length : 70
   cell_type : lstm
-  cell_dim : 256
+  cell_dim : 64 #256
   positional : 0
   cell_dropout : .2
   num_layers : 1
@@ -49,12 +49,12 @@ decoder:
   encode_position_mode : cat
 
 network :
-  type: densenet
-  growth_rate : 32
+  type: seq2seq
+  #growth_rate : 32
   num_layers: 20
   divide_channels : 2
-  kernels : 3
-  kernel : 3
+  #kernels : 3
+  #kernel : 3
   dilation : 1
   groups : 1
   layer_type: 1
@@ -80,7 +80,7 @@ mapper:
   dropout : .2
 
 loss:
-  version : ml  # tok , seq
+  version : ctc  # tok , seq ? ctc, ml, smooth_ml
   combine_loss : 0  # if 1: Tok-Seq
   normalize_batch : 1
   penalize_confidence : 0
@@ -89,7 +89,7 @@ data:
   src : voice
   trg : ru
   dir : data/m_ailabs
-  batch_size: 16
+  batch_size: 8
   max_src_length : 70
   max_trg_length : 70
 
@@ -97,9 +97,9 @@ optim:
   reset : 1
   seed : 1
   LR:
-      base : 0.001
+      base : 0.0001
       decay_start : 0
-      decay_every: 10
+      decay_every: 1 #10
       decay_rate : 0.5
       patience : 2
       criterion : loss
