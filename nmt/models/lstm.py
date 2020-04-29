@@ -253,20 +253,20 @@ class LocalDotAttention(nn.Module):
         Tx = context.size(1)
         # predict the alignement position:
         pt = self.tanh(self.linear_predict_1(input))
-        print('pt:', pt.size())
+        #print('pt:', pt.size())
         pt = self.linear_predict_2(pt)
-        print('pt size:', pt.size())
+        #print('pt size:', pt.size())
         pt = Tx * self.sigmoid(pt)
-        bl, bh = (pt-self.window).int(), (pt+self.window).int()
+        bl, bh = (pt-self.sigma).int(), (pt+self.sigma).int()
         indices = torch.cat([torch.arange(i.item(), j.item()).unsqueeze(0)
                              for i, j in zip(bl, bh)],
-                            dim=0).long().cuda()
-        print('indices:', indices.size())
+                            dim=0).unsqueeze(-1).repeat(1,1,context.size(2)).long().cuda()
+        #print('indices:', indices.size())
         # Get attention
         target = self.linear_in(input).unsqueeze(2)  # batch x dim x 1
-        print('type(context):', type(context))
-        context_window = context.gather(0, indices)
-        print('context window:', context_window.size())
+        #print('type(context):', type(context))
+        context_window = context.gather(1, indices)
+        #print('context window:', context_window.size())
         attn = torch.bmm(context_window, target).squeeze(2)  # batch x sourceL
         attn = self.sm(self.dropout(attn))
         attn3 = attn.view(attn.size(0), 1, attn.size(1))  # batch x 1 x sourceL

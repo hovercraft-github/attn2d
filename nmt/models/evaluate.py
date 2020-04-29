@@ -198,7 +198,11 @@ def evaluate_model(job_name, trainer, src_loader, trg_loader, eval_kwargs):
         data_src, order = src_loader.get_src_batch(split, batch_size)
         data_trg = trg_loader.get_trg_batch(split, order, batch_size)
         n += batch_size
-        if model.version == 'seq2seq':
+        if model.version == 'fair':
+            logp = model(data_src, data_trg) #shape=N,T,C
+            losses, stats = crit(logp, data_trg['out_labels'])
+            batch_preds = model.sample(logp)
+        elif model.version == 'seq2seq':
             source = model.encoder(data_src)
             source = model.map(source)
             if trainer.criterion.version == "seq":
@@ -219,15 +223,15 @@ def evaluate_model(job_name, trainer, src_loader, trg_loader, eval_kwargs):
         if isinstance(batch_preds, list):
             # wiht beam size unpadded preds
             sent_preds = [decode_sequence(trg_loader.get_vocab(),
-                                          np.array(pred).reshape(1, -1),
-                                          eos=trg_loader.eos,
-                                          bos=trg_loader.bos)[0]
-                          for pred in batch_preds]
+                                        np.array(pred).reshape(1, -1),
+                                        eos=trg_loader.eos,
+                                        bos=trg_loader.bos)[0]
+                        for pred in batch_preds]
         else:
             # decode
             sent_preds = decode_sequence(trg_loader.get_vocab(), batch_preds,
-                                         eos=trg_loader.eos,
-                                         bos=trg_loader.bos)
+                                        eos=trg_loader.eos,
+                                        bos=trg_loader.bos)
         # Do the same for gold sentences
         # sent_source = decode_sequence(src_loader.get_vocab(),
         #                               data_src['labels'],

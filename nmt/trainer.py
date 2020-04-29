@@ -61,6 +61,7 @@ class Trainer(object):
         self.iteration = 0
         self.epoch = 0
         self.batch_offset = 0
+        self.pass_no = 0
         # Dump  the model params:
         json.dump(params, open('%s/params.json' % params['modelname'], 'w'))
 
@@ -94,7 +95,7 @@ class Trainer(object):
             ntokens = torch.sum(data_src['lengths'] *
                                 data_trg['lengths']).data.item()
 
-        return losses, batch_size, ntokens
+        return losses, batch_size, ntokens, decoder_logit
 
     def backward_step(self, loss, ml_loss, ntokens, nseqs, start, wrapped):
         """

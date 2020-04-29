@@ -43,7 +43,7 @@ class PosEmbedding(nn.Embedding):
 
 class NullEmbedding(nn.Module):
     def __init__(self, params,
-                 vocab_size, padding_idx,
+                 vocab_size=0, padding_idx=0,
                  pad_left=False):
 
         nn.Module.__init__(self)

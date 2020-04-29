@@ -118,8 +118,10 @@ class textDataLoader(object):
 
     def get_trg_batch(self, split, order, batch_size=None):
         batch_size = batch_size or self.batch_size
-        in_label_batch = np.zeros([batch_size, self.seq_length + 1], dtype='int')
-        out_label_batch = np.zeros([batch_size, self.seq_length + 1], dtype='int')
+        # in_label_batch = np.zeros([batch_size, self.seq_length + 1], dtype='int')
+        # out_label_batch = np.zeros([batch_size, self.seq_length + 1], dtype='int')
+        in_label_batch = np.zeros([batch_size, self.seq_length], dtype='int')
+        out_label_batch = np.zeros([batch_size, self.seq_length], dtype='int')
         len_batch = []
         pointer = 'labels_%s' % split
         len_pointer = 'lengths_%s' % split
@@ -133,12 +135,18 @@ class textDataLoader(object):
                 wrapped = True
             self.iterators[split] = ri_next
             # add <bos>
-            in_label_batch[i, 0] = self.bos
-            in_label_batch[i, 1:] = self.h5_file[pointer][ri, :self.seq_length]
+            # in_label_batch[i, 0] = self.bos
+            # in_label_batch[i, 1:] = self.h5_file[pointer][ri, :self.seq_length]
+            full_str = self.h5_file[pointer][ri, :self.seq_length]
+            no_blanks = full_str[full_str > 2]
+            ll = len(no_blanks)
+            in_label_batch[i, 0:ll] = no_blanks
             # add <eos>
-            ll = min(self.seq_length, self.h5_file[len_pointer][ri])
-            len_batch.append(ll + 1)
-            out_label_batch[i] = np.insert(in_label_batch[i, 1:], ll, self.eos)
+            # ll = min(self.seq_length, self.h5_file[len_pointer][ri])
+            # len_batch.append(ll + 1)
+            # out_label_batch[i] = np.insert(in_label_batch[i, 1:], ll, self.eos)
+            len_batch.append(ll)
+            out_label_batch[i] = in_label_batch[i]
 
         data = {}
         data['labels'] = torch.from_numpy(in_label_batch[order, :max(len_batch)]).cuda()

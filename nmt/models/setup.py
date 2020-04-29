@@ -4,12 +4,15 @@ Setup the model and the loss criterion
 import nmt.loss as loss
 from .seq2seq import Seq2Seq
 from .pervasive import Pervasive, Pervasive_Parallel
+from .wav2letter import Wav2Letter
 
 
 
 def build_model(jobname, params, src_vocab_size, trg_vocab_size, trg_specials):
     ref = params['model']
-    if ref == "seq2seq-attention":
+    if ref == "fair1_centroids":
+        model = Wav2Letter(jobname, params, trg_vocab_size)
+    elif ref == "seq2seq-attention":
         model = Seq2Seq(jobname, params,
                         src_vocab_size,
                         trg_vocab_size,

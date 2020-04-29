@@ -7,6 +7,8 @@ Main training script
 import time
 import logging
 from nmt.params import parse_params, set_env
+import nmt.utils.logging as lg
+from nmt.utils import decode_sequence
 
 
 def train(params):
@@ -51,6 +53,8 @@ def train(params):
     src_loader.iterators = iters.get('src_iterators', src_loader.iterators)
     trg_loader.iterators = iters.get('trg_iterators', trg_loader.iterators)
 
+    pass_no = 0
+
     if trainer.lr_patient:
         trainer.update_params()
     while True:
@@ -67,11 +71,25 @@ def train(params):
         for _ in range(params['optim']['num_batches']):
             data_src, order = src_loader.get_src_batch('train')
             data_trg = trg_loader.get_trg_batch('train', order)
-            losses, batch_size, ntokens = trainer.step(data_src, data_trg)
+            losses, batch_size, ntokens, logp = trainer.step(data_src, data_trg)
             avg_loss += ntokens * losses['final']
             avg_ml_loss += ntokens * losses['ml']
             total_nseqs += batch_size
             total_ntokens += ntokens
+            pass_no += 1
+            if pass_no % 1000 == 0:
+                if model.version == 'fair':
+                    batch_preds = model.sample(logp)
+                    sent_preds = decode_sequence(trg_loader.get_vocab(), batch_preds,
+                                    eos=trg_loader.eos,
+                                    bos=trg_loader.bos)
+                    sent_gold = decode_sequence(trg_loader.get_vocab(),
+                                    data_trg['out_labels'],
+                                    eos=trg_loader.eos,
+                                    bos=trg_loader.bos)
+                    for (l, gl) in zip(sent_preds, sent_gold):
+                        lg.print_sampled(gl, l)
+
 
         avg_loss /= total_ntokens
         avg_ml_loss /= total_ntokens

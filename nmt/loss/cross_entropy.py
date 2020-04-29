@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from nmt.utils import to_contiguous
+import math
 
 
 class SmoothMLCriterion(nn.Module):
@@ -47,7 +48,8 @@ class CTCCriterion(nn.Module):
         self.logger = logging.getLogger(job_name)
         self.th_mask = params.get('mask_threshold', 1)  # both pad and unk
         self.version = 'ctc'
-        self.ctc_loss = nn.CTCLoss(blank=0, zero_infinity=False, reduction='none').cuda()
+        #self.ctc_loss = nn.CTCLoss(blank=0, zero_infinity=False, reduction='none').cuda()
+        self.ctc_loss = nn.CTCLoss(blank=0, zero_infinity=False, reduction='mean').cuda()
         # for param in self.parameters():
         #     param.requires_grad = False
 
@@ -63,7 +65,7 @@ class CTCCriterion(nn.Module):
         seq_length = logp.size(1)
         #vocab = logp.size(2)
         labels = to_contiguous(target)
-        labels = labels[:, :seq_length]
+        labels = labels[:, :math.floor(seq_length)]
         y_lengths = (labels.size(1) - (labels <= self.th_mask).sum(dim=1)).int().cpu()
         labels = to_contiguous(labels).view(-1)
         labels = labels[(labels > self.th_mask).nonzero()].int()
@@ -74,8 +76,8 @@ class CTCCriterion(nn.Module):
 
         output = self.ctc_loss(logp, labels, x_lengths, y_lengths)
 
-        output = torch.sum(output)
-        output /= batch_size
+        # output = torch.sum(output)
+        # output /= batch_size
 
         if torch.isinf(output).any() or torch.isnan(output).any():
             output.data.copy_(torch.tensor(1000.0).data)

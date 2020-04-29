@@ -49,13 +49,13 @@ def to_contiguous(tensor):
 def decode_sequence(ix_to_word, seq, eos, bos, remove_bpe=0):
     """
     Decode sequence into natural language
-    Input: seq, N*D numpy array, with elements in 0 .. vocab_size.
+    Input: seq, N*T numpy array, with elements in 0 .. vocab_size.
     """
-    N, D = seq.shape
+    N, T = seq.shape
     out = []
     for i in range(N):
         txt = []
-        for j in range(D):
+        for j in range(T):
             ix = seq[i, j].item()
             if ix > 0 and not ix == eos:
                 if ix == bos:

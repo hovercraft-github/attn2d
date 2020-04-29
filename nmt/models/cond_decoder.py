@@ -305,11 +305,10 @@ class CondDecoder(nn.Module):
         max_length = kwargs.get('max_length', 50)
         seq = []
         scores = None
+        input = torch.LongTensor([[self.bos_token]
+                                    for i in range(batch_size)
+                                    ]).cuda()
         for t in range(max_length):
-            if t == 0:
-                input = torch.LongTensor([[self.bos_token]
-                                          for i in range(batch_size)
-                                          ]).cuda()
             emb = self.embedding(input)
             h, state, _ = self.cell(
                 emb,

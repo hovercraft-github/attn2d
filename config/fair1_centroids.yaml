@@ -1,6 +1,6 @@
-modelname:  seq2seq-attention
+modelname:  fair1_centroids
     
-model : seq2seq-attention
+model : fair1_centroids
 start_from : 0
 start_from_best : 1
 
@@ -15,7 +15,7 @@ encoder:
   cell_dim : 64 #256
   cell_dropout : .2
   bidirectional : 0
-  num_layers : 3
+  num_layers : 1
   parallel : 0
   scale_grad_by_freq : 0
   positional : 0
@@ -33,10 +33,10 @@ decoder:
   cell_dim : 64 #256
   positional : 0
   cell_dropout : .2
-  #num_layers : 1
-  state_update : 1 # 1=LSTMAttention, 2=LSTMAttentionV2
+  num_layers : 1
+  state_update : 1
   attention_dropout : .0
-  attention_mode : allamanis #local-dot # none=LSTM,other=state_update
+  attention_mode : dot
   normalize_attention : 0
   attention_channels : 64,32
   attention_windows : 9,7,5
@@ -51,7 +51,7 @@ decoder:
 network :
   type: seq2seq
   #growth_rate : 32
-  #num_layers: 20
+  num_layers: 20
   divide_channels : 2
   #kernels : 3
   #kernel : 3
@@ -80,7 +80,7 @@ mapper:
   dropout : .2
 
 loss:
-  version : ml  # tok , seq ? ctc, ml, smooth_ml
+  version : ctc  # tok , seq ? ctc, ml, smooth_ml
   combine_loss : 0  # if 1: Tok-Seq
   normalize_batch : 1
   penalize_confidence : 0
