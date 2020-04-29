@@ -100,7 +100,7 @@ optim:
       base : 0.0001
       decay_start : 0
       decay_every: 10
-      decay_rate : 0.75
+      decay_rate : 0.95
       patience : 2
       criterion : loss
       schedule : step
@@ -114,7 +114,7 @@ optim:
       schedule : step
 
   num_batches : 1
-  max_epochs : 35
+  max_epochs : 100
   solver : adam
   alpha : 0.9
   beta : .999
