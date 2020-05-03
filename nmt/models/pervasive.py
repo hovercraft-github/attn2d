@@ -145,8 +145,10 @@ class Pervasive(nn.Module):
                                      params['aggregator'])
         self.final_output_channels = self.aggregator.output_channels  # d_h
 
-        self.prediction_dropout = nn.Dropout(
-            params['decoder']['prediction_dropout'])
+        self.prediction_dropout = None
+        drpout = params['decoder']['prediction_dropout'] or .0
+        if drpout > 0:
+            self.prediction_dropout = nn.Dropout(drpout)
         self.logger.info('Output channels: %d', self.final_output_channels)
         self.prediction = nn.Linear(self.final_output_channels,
                                     self.trg_vocab_size)
@@ -233,8 +235,12 @@ class Pervasive(nn.Module):
         X = self.merge(src_emb, trg_emb)
         # del src_emb, trg_emb
         X = self._forward(X, data_src['lengths'])
-        logits = F.log_softmax(
-            self.prediction(self.prediction_dropout(X)), dim=2)
+        if not self.prediction_dropout == None:
+            logits = F.log_softmax(
+                self.prediction(self.prediction_dropout(X)), dim=2)
+        else:
+            logits = F.log_softmax(
+                self.prediction(X), dim=2)
         return logits
 
     # @profile
@@ -292,7 +298,10 @@ class Pervasive(nn.Module):
             aligns.append(attn[1])
             activ_aligns.append(attn[2])
             activs.append(attn[3][0])
-            proj = self.prediction_dropout(Y[:, -1, :])
+            if not self.prediction_dropout == None:
+                proj = self.prediction_dropout(Y[:, -1, :])
+            else:
+                proj = Y[:, -1, :]
             logits = F.log_softmax(self.prediction(proj), dim=1)
             if self.padding_idx:
                 logits[:, self.padding_idx] = -math.inf
@@ -356,7 +365,10 @@ class Pervasive(nn.Module):
             aligns.append(attn[1])
             activ_aligns.append(attn[2])
             activs.append(attn[3][0])
-            proj = self.prediction_dropout(Y[:, -1, :])
+            if not self.prediction_dropout == None:
+                proj = self.prediction_dropout(Y[:, -1, :])
+            else:
+                proj = Y[:, -1, :]
             logits = F.log_softmax(self.prediction(proj), dim=1)
             if self.padding_idx:
                 logits[:, self.padding_idx] = -math.inf
@@ -410,7 +422,10 @@ class Pervasive(nn.Module):
         for t in range(max_length):
             X = self.merge(src_emb, trg_emb)
             Y, _ = self.update(X, data_src["lengths"])
-            proj = self.prediction_dropout(Y[:, -1, :])
+            if not self.prediction_dropout == None:
+                proj = self.prediction_dropout(Y[:, -1, :])
+            else:
+                proj = Y[:, -1, :]
             logits = F.log_softmax(self.prediction(proj), dim=1)
             if self.padding_idx:
                 logits[:, self.padding_idx] = -math.inf
@@ -467,7 +482,10 @@ class Pervasive(nn.Module):
         for t in range(max_length):
             X = self.merge(src_emb, trg_emb)
             Y = self._forward(X, data_src["lengths"])
-            proj = self.prediction_dropout(Y[:, -1, :])
+            if not self.prediction_dropout == None:
+                proj = self.prediction_dropout(Y[:, -1, :])
+            else:
+                proj = Y[:, -1, :]
             logits = F.log_softmax(self.prediction(proj), dim=1)
             if self.padding_idx:
                 logits[:, self.padding_idx] = -math.inf
@@ -529,7 +547,10 @@ class Pervasive(nn.Module):
             # X: N, Tt, Ts, Ds+Dt
             X = self.merge(src_emb, trg_emb)
             Y = self._forward(X, src_lengths)
-            proj = self.prediction_dropout(Y[:, -1, :])
+            if not self.prediction_dropout == None:
+                proj = self.prediction_dropout(Y[:, -1, :])
+            else:
+                proj = Y[:, -1, :]
             logits = F.log_softmax(self.prediction(proj), dim=1)
             word_lk = logits.view(beam_size,
                                   remaining_sents,

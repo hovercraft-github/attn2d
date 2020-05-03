@@ -7,13 +7,13 @@ start_from_best : 1
 encoder:
   type : null
   input_dim : 20
-  input_dropout : .2
+  input_dropout : .0 #.2
   encode_position : 0
   encode_length : 0
   max_length : 70
   cell_type : lstm
   cell_dim : 64 #256
-  cell_dropout : .2
+  cell_dropout : .0 #.2
   bidirectional : 0
   num_layers : 1
   parallel : 0
@@ -25,14 +25,14 @@ decoder:
   tie_target_weights : 0
   copy_source_weights : 0
   input_dim : 64
-  input_dropout : .2
+  input_dropout : .0 #.2
   encode_position : 0
   encode_length : 0
   max_length : 70
   cell_type : lstm
   cell_dim : 64 #256
   positional : 0
-  cell_dropout : .2
+  cell_dropout : .0 #.2
   num_layers : 1
   state_update : 1
   attention_dropout : .0
@@ -41,7 +41,7 @@ decoder:
   attention_channels : 64,32
   attention_windows : 9,7,5
   decode: greedy 
-  prediction_dropout : .2
+  prediction_dropout : .0 #.2
   scale_grad_by_freq : 0
   conditionned : 1
   encode_length : 0
@@ -77,10 +77,10 @@ aggregator:
 
 # For RNN models
 mapper:
-  dropout : .2
+  dropout : .0 #.2
 
 loss:
-  version : ctc  # tok , seq ? ctc, ml, smooth_ml
+  version : ml  # tok , seq ? ctc, ml, smooth_ml
   combine_loss : 0  # if 1: Tok-Seq
   normalize_batch : 1
   penalize_confidence : 0
@@ -100,7 +100,7 @@ optim:
       base : 0.0001
       decay_start : 0
       decay_every: 10
-      decay_rate : 0.75
+      decay_rate : 0.95
       patience : 2
       criterion : loss
       schedule : step
@@ -114,7 +114,7 @@ optim:
       schedule : step
 
   num_batches : 1
-  max_epochs : 35
+  max_epochs : 200
   solver : adam
   alpha : 0.9
   beta : .999

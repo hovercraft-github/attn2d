@@ -50,7 +50,7 @@ class NullEmbedding(nn.Module):
         #self.dimension = params['input_dim']
         #self.encode_length = params['encode_length']
         #self.encode_position = params['encode_position']
-        self.dropout = params.get('input_dropout', None)
+        self.dropout = params.get('input_dropout', 0)
         #self.init_std = params.get('init_std', .01)
         #self.zero_pad = params.get('zero_pad', 0)
         #self.padding_idx = padding_idx
@@ -64,7 +64,7 @@ class NullEmbedding(nn.Module):
             emb = data["labels"]
         else:
             emb = data
-        if not self.dropout == None:
+        if not self.dropout > 0.:
             emb = F.dropout(emb,
                             p=self.dropout,
                             training=self.training)
@@ -72,7 +72,7 @@ class NullEmbedding(nn.Module):
 
     def single_token(self, tok, position, length=None):
         emb = tok
-        if not self.dropout == None:
+        if not self.dropout > 0:
             emb = F.dropout(emb,
                             p=self.dropout,
                             training=self.training)

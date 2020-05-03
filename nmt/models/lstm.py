@@ -232,7 +232,7 @@ class LocalDotAttention(nn.Module):
     def __init__(self, params):
         super(LocalDotAttention, self).__init__()
         dim = params['cell_dim']
-        dropout = params['attention_dropout']
+        dropout = params['attention_dropout'] or .0
         self.window = 4  # D
         self.sigma = self.window / 2
         self.linear_in = nn.Linear(dim, dim, bias=False)
@@ -242,7 +242,9 @@ class LocalDotAttention(nn.Module):
 
         self.tanh = nn.Tanh()
         self.sm = nn.Softmax(dim=1)
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = None
+        if dropout > .0:
+            self.dropout = nn.Dropout(dropout)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, input, context, src_emb=None):
@@ -268,7 +270,10 @@ class LocalDotAttention(nn.Module):
         context_window = context.gather(1, indices)
         #print('context window:', context_window.size())
         attn = torch.bmm(context_window, target).squeeze(2)  # batch x sourceL
-        attn = self.sm(self.dropout(attn))
+        if not self.dropout == None:
+            attn = self.sm(self.dropout(attn))
+        else:
+            attn = self.sm(attn)
         attn3 = attn.view(attn.size(0), 1, attn.size(1))  # batch x 1 x sourceL
         weighted_context = torch.bmm(attn3, context_window).squeeze(1)  # batch x dim
         h_tilde = torch.cat((weighted_context, input), 1)
@@ -292,7 +297,10 @@ class SoftDotAttention(nn.Module):
         self.sm = nn.Softmax(dim=1)
         self.linear_out = nn.Linear(dim * 2, dim, bias=False)
         self.tanh = nn.Tanh()
-        self.dropout = nn.Dropout(params['attention_dropout'])
+        dropout = params['attention_dropout'] or .0
+        self.dropout = None
+        if dropout > .0:
+            self.dropout = nn.Dropout(dropout)
 
     def forward(self, input, context, src_emb=None):
         """Propogate input through the network.
@@ -302,7 +310,10 @@ class SoftDotAttention(nn.Module):
         target = self.linear_in(input).unsqueeze(2)  # batch x dim x 1
         # Get attention
         attn = torch.bmm(context, target).squeeze(2)  # batch x sourceL
-        attn = self.sm(self.dropout(attn))
+        if not self.dropout == None:
+            attn = self.sm(self.dropout(attn))
+        else:
+            attn = self.sm(attn)
         attn3 = attn.view(attn.size(0), 1, attn.size(1))  # batch x 1 x sourceL
 
         weighted_context = torch.bmm(attn3, context).squeeze(1)  # batch x dim

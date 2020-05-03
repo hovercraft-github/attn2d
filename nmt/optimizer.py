@@ -155,11 +155,12 @@ class Optimizer(object):
         elif ref.lower() == 'rmsprop':
             optimizer = optim.RMSprop(params,
                                       lr=lr,
-                                      alpha=opt['alpha'],
-                                      eps=opt['epsilon'],
-                                      weight_decay=opt['weight_decay'],
-                                      momentum=opt.get('momentum', 0),
-                                      centered=False)
+                                      #alpha=opt['alpha'],
+                                      #eps=opt['epsilon'],
+                                      weight_decay=opt['weight_decay']
+                                      #momentum=opt.get('momentum', 0),
+                                      #centered=False
+                                      )
         elif ref.lower() == 'adagrad':
             optimizer = optim.Adagrad(params,
                                       lr=lr,

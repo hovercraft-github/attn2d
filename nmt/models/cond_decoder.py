@@ -23,7 +23,9 @@ class CondDecoder(nn.Module):
             self.pad_token,
             scale_grad_by_freq=bool(params['scale_grad_by_freq'])
         )
-        self.input_dropout = nn.Dropout(params['input_dropout'])
+        self.input_dropout = None
+        if params['input_dropout'] > 0:
+            self.input_dropout = nn.Dropout(params['input_dropout'])
         # print('Setting attention!', params['attention_mode'])
         if params["attention_mode"] == "none":
             self.cell = LSTM(self.input_dim,
@@ -37,7 +39,9 @@ class CondDecoder(nn.Module):
             elif params['state_update'] == 2:
                 self.cell = LSTMAttentionV2(params, enc_params)
 
-        self.prediction_dropout = nn.Dropout(params['prediction_dropout'])
+        self.prediction_dropout = None
+        if params['prediction_dropout'] > 0:
+            self.prediction_dropout = nn.Dropout(params['prediction_dropout'])
         self.prediction = nn.Linear(self.size,
                                     self.vocab_size)
 
@@ -49,7 +53,9 @@ class CondDecoder(nn.Module):
 
     def forward_(self, source, data):
         labels = data['labels']
-        emb = self.input_dropout(self.embedding(labels))
+        emb = self.embedding(labels)
+        if not self.input_dropout == None:
+            emb = self.input_dropout(emb)
         h, (_, _), _ = self.cell(
             emb,
             source['state'],
@@ -62,7 +68,9 @@ class CondDecoder(nn.Module):
 
     def forward(self, source, data):
         labels = data['labels']
-        emb = self.input_dropout(self.embedding(labels))
+        emb = self.embedding(labels)
+        if not self.input_dropout == None:
+            emb = self.input_dropout(emb)
         h, (_, _), _ = self.cell(
             emb,
             source['state'],
@@ -74,11 +82,16 @@ class CondDecoder(nn.Module):
             h.size()[0] * h.size()[1],
             h.size()[2]
         )
-        logits = F.log_softmax(
-            self.prediction(
-                self.prediction_dropout(
-                    h_reshape)),
-            dim=1)
+        if not self.prediction_dropout == None:
+            logits = F.log_softmax(
+                self.prediction(
+                    self.prediction_dropout(
+                        h_reshape)),
+                dim=1)
+        else:
+            logits = F.log_softmax(
+                self.prediction(h_reshape),
+                dim=1)
         logits = logits.view(
             h.size(0),
             h.size(1),

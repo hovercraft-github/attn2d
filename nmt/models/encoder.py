@@ -36,7 +36,10 @@ class Encoder(nn.Module):
         else:
             self.embedding = NullEmbedding({}, self.vocab_size, self.pad_token)
 
-        self.input_dropout = nn.Dropout(params['input_dropout'])
+        self.input_dropout = None
+        input_dropout = params.get('input_dropout', 0)
+        if input_dropout > 0:
+            self.input_dropout = nn.Dropout(input_dropout)
         if params['cell_dropout'] and self.nlayers == 1:
             # dropout effective only if nlyaers > 1
             params['cell_dropout'] = 0
@@ -81,7 +84,10 @@ class Encoder(nn.Module):
         labels = data['labels']
         lengths = data['lengths']
         batch_size = labels.size(0)
-        emb = self.input_dropout(self.embedding(labels))
+        if not self.input_dropout == None:
+            emb = self.input_dropout(self.embedding(labels))
+        else:
+            emb = self.embedding(labels)
         _emb = emb  # to pass in case needed for attenion scores
         pack_emb = pack_padded_sequence(emb,
                                         lengths,

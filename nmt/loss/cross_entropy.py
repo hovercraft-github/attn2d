@@ -114,13 +114,14 @@ class MLCriterion(nn.Module):
         """
         # print('logp:', logp.size(), "target:", target.size())
         batch_size = logp.size(0)
-        seq_length = logp.size(1)
-        vocab = logp.size(2)
-        target = target[:, :seq_length]
-        logp = to_contiguous(logp).view(-1, logp.size(2))
-        target = to_contiguous(target).view(-1, 1)
-        mask = target.gt(self.th_mask)
-        ml_output = - logp.gather(1, target)[mask]
+        seq_length = min(logp.size(1), target.size(1))
+        #vocab = logp.size(2)
+        target_ = target[:, :seq_length]
+        logp_ = logp[:, :seq_length, :]
+        logp_ = to_contiguous(logp_).view(-1, logp_.size(2))
+        target_ = to_contiguous(target_).view(-1, 1)
+        mask = target_.gt(self.th_mask)
+        ml_output = - logp_.gather(1, target_)[mask]
         ml_output = torch.sum(ml_output)
 
         if self.normalize == 'ntokens':

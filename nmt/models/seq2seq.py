@@ -18,7 +18,10 @@ class Seq2Seq(nn.Module):
         self.encoder = Encoder(params['encoder'], src_vocab_size)
         self.decoder = CondDecoder(params['decoder'], params['encoder'],
                                    trg_vocab_size, trg_specials)
-        self.mapper_dropout = nn.Dropout(params['mapper']['dropout'])
+        drpout = params['mapper']['dropout'] or .0
+        self.mapper_dropout = None
+        if drpout > 0:
+            self.mapper_dropout = nn.Dropout(drpout)
         self.mapper = nn.Linear(self.encoder.size,
                                 self.decoder.size)
 
@@ -31,9 +34,12 @@ class Seq2Seq(nn.Module):
     def map(self, source):
         """ map the source code to the decoder cell size """
         # map hT^(enc) to h0^(dec)
-        source['state'][0] = nn.Tanh()(self.mapper_dropout(
-            self.mapper(source['state'][0])
-        ))
+        if not self.mapper_dropout == None:
+            source['state'][0] = nn.Tanh()(self.mapper_dropout(
+                self.mapper(source['state'][0])
+            ))
+        else:
+            source['state'][0] = nn.Tanh()(self.mapper(source['state'][0]))
         return source
 
     def forward(self, data_src, data_trg):

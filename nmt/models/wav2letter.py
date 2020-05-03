@@ -77,8 +77,10 @@ class Wav2Letter(nn.Module):
         self.src_embedding = NullEmbedding(
             params['encoder']
             )
-        self.prediction_dropout = nn.Dropout(
-            params['decoder']['prediction_dropout'])
+        drpout = params['decoder']['prediction_dropout'] or .0
+        self.prediction_dropout = None
+        if drpout > 0:
+            self.prediction_dropout = nn.Dropout(drpout)
 
     def init_weights(self):
         self.src_embedding.init_weights()
@@ -100,7 +102,8 @@ class Wav2Letter(nn.Module):
 
         # y_pred shape (batch_size, num_classes, output_len)
         y_pred = self.layers(batch)
-        y_pred = self.prediction_dropout(y_pred)
+        if not self.prediction_dropout == None:
+            y_pred = self.prediction_dropout(y_pred)
 
         # compute log softmax probability on graphemes
         log_probs = F.log_softmax(y_pred, dim=1)
