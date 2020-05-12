@@ -64,6 +64,10 @@ class textDataLoader(object):
             except:
                 self.eos = self.pad
                 self.bos = self.pad
+            try:
+                self.blank = word_to_ix[' ']
+            except:
+                self.blank = 26
         else:
             self.pad = 0
             self.unk = 1
@@ -138,7 +142,7 @@ class textDataLoader(object):
             in_label_batch[i, 0] = self.bos
             # in_label_batch[i, 1:] = self.h5_file[pointer][ri, :self.seq_length]
             full_str = self.h5_file[pointer][ri, :self.seq_length]
-            no_blanks = full_str[full_str > 2]
+            no_blanks = full_str[full_str != self.blank]
             ll = len(no_blanks)
             #in_label_batch[i, 0:ll] = no_blanks
             in_label_batch[i, 1:ll+1] = no_blanks

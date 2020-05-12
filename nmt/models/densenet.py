@@ -7,9 +7,92 @@ import torch
 import torch.nn as nn
 from .dense_modules import *
 from .transitions import Transition, Transition2
+import torch.utils.checkpoint as cp
 
 
-class DenseBlock(nn.Sequential):
+class _DenseLayer(nn.Module):
+    #def __init__(self, num_input_features, growth_rate, bn_size, conv_dropout, memory_efficient=False):
+    def __init__(self,
+                 num_input_features,
+                 kernel_size,
+                 params
+                ):
+        super(_DenseLayer, self).__init__()
+        self.kernel_size = kernel_size
+        self.padding = self.kernel_size // 2
+        self.bn_size = params.get('bn_size', 4)
+        self.growth_rate = params.get('growth_rate', 32)
+        self.drop_rate = float(params.get('conv_dropout', 0.))
+        self.memory_efficient = params.get('efficient', 0)
+        self.num_input_features = num_input_features
+
+        self.add_module('norm1', nn.BatchNorm2d(self.num_input_features)),
+        self.add_module('relu1', nn.ReLU(inplace=True)),
+        self.add_module('conv1', nn.Conv2d(self.num_input_features,
+                                           self.bn_size * self.growth_rate, kernel_size=1, stride=1,
+                                           bias=False)),
+        self.add_module('norm2', nn.BatchNorm2d(self.bn_size * self.growth_rate)),
+        self.add_module('relu2', nn.ReLU(inplace=True)),
+        self.add_module('conv2', nn.Conv2d(self.bn_size * self.growth_rate, self.growth_rate,
+                                           kernel_size=self.kernel_size, stride=1, padding=self.padding,
+                                           bias=False)),
+
+    def bn_function(self, inputs):
+        # type: (List[Tensor]) -> Tensor
+        concated_features = torch.cat(inputs, 1)
+        bottleneck_output = self.conv1(self.relu1(self.norm1(concated_features)))  # noqa: T484
+        return bottleneck_output
+
+    # todo: rewrite when torchscript supports any
+    def any_requires_grad(self, input):
+        # type: (List[Tensor]) -> bool
+        for tensor in input:
+            if tensor.requires_grad:
+                return True
+        return False
+
+    @torch.jit.unused  # noqa: T484
+    def call_checkpoint_bottleneck(self, input):
+        # type: (List[Tensor]) -> Tensor
+        def closure(*inputs):
+            return self.bn_function(*inputs)
+
+        return cp.checkpoint(closure, input)
+
+    # @torch.jit._overload_method  # noqa: F811
+    # def forward(self, input):
+    #     # type: (List[Tensor]) -> (Tensor)
+    #     pass
+
+    # @torch.jit._overload_method  # noqa: F811
+    # def forward(self, input):
+    #     # type: (Tensor) -> (Tensor)
+    #     pass
+
+    # torchscript does not yet support *args, so we overload method
+    # allowing it to take either a List[Tensor] or single Tensor
+    def forward(self, input):  # noqa: F811
+        if isinstance(input, torch.Tensor):
+            prev_features = [input]
+        else:
+            prev_features = input
+
+        if self.memory_efficient and self.any_requires_grad(prev_features):
+            if torch.jit.is_scripting():
+                raise Exception("Memory Efficient not supported in JIT")
+
+            bottleneck_output = self.call_checkpoint_bottleneck(prev_features)
+        else:
+            bottleneck_output = self.bn_function(prev_features)
+
+        new_features = self.conv2(self.relu2(self.norm2(bottleneck_output)))
+        if self.drop_rate > 0:
+            new_features = F.dropout(new_features, p=self.drop_rate,
+                                     training=self.training)
+        return new_features
+
+
+class DenseBlock(nn.ModuleDict): #nn.Sequential
     def __init__(self, num_layers,
                  num_input_features,
                  kernels,
@@ -18,7 +101,7 @@ class DenseBlock(nn.Sequential):
         layer_type = params.get('layer_type', 1)
         growth_rate = params.get('growth_rate', 32)
         if layer_type == "regular":
-            LayerModule = DenseLayer
+            LayerModule = _DenseLayer
         elif layer_type == "mid-dropout":  # Works fine, basically another dropout
             LayerModule = DenseLayer_midDP
         elif layer_type == "nobn":  # W/o BN works fine if weights initialized "correctly"
@@ -35,11 +118,18 @@ class DenseBlock(nn.Sequential):
             layer = LayerModule(
                 num_input_features + i * growth_rate,
                 kernels[i],
-                params,
-                first=i==0,
+                params
+                #first=i==0,
                 )
             self.add_module('denselayer%d' % (i + 1), layer)
-        
+
+    def forward(self, init_features):
+        features = [init_features]
+        for name, layer in self.items():
+            new_features = layer(features)
+            features.append(new_features)
+        return torch.cat(features, 1)
+
     def update(self, x):
         for layer in list(self.children()):
             x = layer.update(x)
@@ -58,6 +148,15 @@ class DenseBlock(nn.Sequential):
             x = torch.cat([x, newf], 1)
         return x, activations
 
+class _Transition(nn.Sequential):
+    def __init__(self, num_input_features, num_output_features):
+        super(_Transition, self).__init__()
+        self.add_module('norm', nn.BatchNorm2d(num_input_features))
+        self.add_module('relu', nn.ReLU(inplace=True))
+        self.add_module('conv', nn.Conv2d(num_input_features, num_output_features,
+                                          kernel_size=1, stride=1, bias=False))
+        self.add_module('pool', nn.AvgPool2d(kernel_size=2, stride=2))
+
 
 class DenseNet(nn.Module):
     def __init__(self, num_init_features, params):
@@ -69,7 +168,7 @@ class DenseNet(nn.Module):
         init_weights = params.get('init_weights', 0)
         normalize_channels = params.get('normalize_channels', 0)
         transition_type = params.get('transition_type', 1)
-        skip_last_trans = params.get('skip_last_trans', 0)
+        skip_last_trans = params.get('skip_last_trans', 1)
 
         if transition_type == 1:
             TransitionLayer = Transition
@@ -101,10 +200,11 @@ class DenseNet(nn.Module):
             num_features = num_features + num_layers * growth_rate
             # In net2: Only between blocks
             if not i == len(block_layers) - 1 or not skip_last_trans:
-                trans = TransitionLayer(
+                trans = _Transition ( #TransitionLayer(
                     num_input_features=num_features,
-                    num_output_features=num_features // 2,
-                    init_weights=init_weights)
+                    num_output_features=num_features // 2
+                    #, init_weights=init_weights
+                    )
                 self.features.add_module('transition%d' % (i + 1), trans)
                 num_features = num_features // 2
                 print("> (trans) ", num_features, end='')

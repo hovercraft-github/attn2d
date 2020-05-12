@@ -95,6 +95,13 @@ class Trainer(object):
             ntokens = torch.sum(data_src['lengths'] *
                                 data_trg['lengths']).data.item()
 
+        # lmbda = torch.tensor(1e-2, device='cuda', requires_grad=False)
+        # l2_reg = torch.tensor(0., device='cuda', requires_grad=False)
+        # for param in self.model.parameters():
+        #     l2_reg += torch.norm(param)
+        # losses['final'] += (lmbda * l2_reg)
+        # #losses['ml'] += lmbda * l2_reg
+
         return losses, batch_size, ntokens, decoder_logit
 
     def backward_step(self, loss, ml_loss, ntokens, nseqs, start, wrapped):
@@ -105,7 +112,7 @@ class Trainer(object):
         if self.clip_norm > 0:
             grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(),
                                                        self.clip_norm)
-        self.track('optim/grad_norm', grad_norm)
+            self.track('optim/grad_norm', grad_norm)
         self.track('optim/ntokens', ntokens)
         self.track('optim/batch_size', nseqs)
 

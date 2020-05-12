@@ -135,13 +135,15 @@ class Optimizer(object):
                        'lr': lr}
                       for m in model]
         else:
-            params = [{'params': model.parameters(), 'lr': lr}]
+            #params = [{'params': model.parameters(), 'lr': lr}]
+            params = model.parameters()
 
+        weight_decay = float(opt['weight_decay'])
         if ref == 'adam':
             optimizer = optim.Adam(params,
                                    lr=lr,
                                    betas=(opt['alpha'], opt['beta']),
-                                   weight_decay=opt['weight_decay'],
+                                   weight_decay=weight_decay,
                                    eps=float(opt['epsilon']),
                                    amsgrad=bool(opt.get('amsgrad', 0)))
         elif ref == 'sgd':
@@ -149,7 +151,7 @@ class Optimizer(object):
                                   lr=lr,
                                   momentum=opt.get('momentum', 0),
                                   dampening=opt.get('dampening', 0),
-                                  weight_decay=opt['weight_decay'],
+                                  weight_decay=weight_decay,
                                   nesterov=bool(opt.get('nesterov', 0)))
 
         elif ref.lower() == 'rmsprop':

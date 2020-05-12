@@ -61,18 +61,22 @@ class CTCCriterion(nn.Module):
         logp : the decoder logits (N, seq_length, V)
         target : the ground truth labels (N, seq_length)
         """
-        batch_size = logp.size(0)
-        seq_length = logp.size(1)
+        #batch_size = logp.size(0)
+        src_length = logp.size(1)
+        xy_ratio = 2.5
         #vocab = logp.size(2)
-        labels = to_contiguous(target)
-        labels = labels[:, :math.floor(seq_length)]
-        y_lengths = (labels.size(1) - (labels <= self.th_mask).sum(dim=1)).int().cpu()
+        #labels = to_contiguous(target)
+        labels = target[:, :math.floor(src_length // xy_ratio)]
+        y_lengths = (labels > self.th_mask).sum(dim=1, dtype=torch.int32).cpu() #.int().cpu()
         labels = to_contiguous(labels).view(-1)
         labels = labels[(labels > self.th_mask).nonzero()].int()
-        labels = labels.squeeze().cpu()
+        labels = to_contiguous(labels.squeeze().cpu())
 
-        x_lengths = torch.full((batch_size,), seq_length, dtype=torch.int32).cpu()  # Length of inputs
-        logp = to_contiguous(logp).permute(1, 0, 2)
+        #x_lengths = torch.full((batch_size,), src_length, dtype=torch.int32, device='cpu')  # Length of inputs
+        x_lengths = (y_lengths * xy_ratio).int() #math.floor
+        x_lengths[(x_lengths > src_length).nonzero()] = src_length
+
+        logp = to_contiguous(logp.permute(1, 0, 2))
 
         output = self.ctc_loss(logp, labels, x_lengths, y_lengths)
 

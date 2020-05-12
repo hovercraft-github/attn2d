@@ -77,9 +77,25 @@ def train(params):
             total_nseqs += batch_size
             total_ntokens += ntokens
             pass_no += 1
+            # batch_preds = torch.topk(logp, 1, dim=2)[1].squeeze()
+            # n_pads = (batch_preds == 0).sum(dim=1)
+            # print(n_pads)
             if pass_no % 1000 == 0:
                 if model.version == 'fair':
                     batch_preds = model.sample(logp)
+                    sent_preds = decode_sequence(trg_loader.get_vocab(), batch_preds,
+                                    eos=trg_loader.eos,
+                                    bos=trg_loader.bos)
+                    sent_gold = decode_sequence(trg_loader.get_vocab(),
+                                    data_trg['out_labels'],
+                                    eos=trg_loader.eos,
+                                    bos=trg_loader.bos)
+                    for (l, gl) in zip(sent_preds, sent_gold):
+                        lg.print_sampled(gl, l)
+                elif model.version == 'conv':
+                    batch_preds = torch.topk(logp, 1, dim=2)[1].squeeze()
+                    n_pads = (batch_preds == 0).sum(dim=1)
+                    print(n_pads)
                     sent_preds = decode_sequence(trg_loader.get_vocab(), batch_preds,
                                     eos=trg_loader.eos,
                                     bos=trg_loader.bos)

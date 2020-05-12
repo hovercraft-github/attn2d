@@ -47,7 +47,7 @@ class NullEmbedding(nn.Module):
                  pad_left=False):
 
         nn.Module.__init__(self)
-        #self.dimension = params['input_dim']
+        self.dimension = params['input_dim']
         #self.encode_length = params['encode_length']
         #self.encode_position = params['encode_position']
         self.dropout = params.get('input_dropout', 0)
@@ -129,7 +129,10 @@ class Embedding(nn.Module):
             # self.label_embedding.weight = W.div(norms)
 
     def forward(self, data):
-        labels = data["labels"]
+        if isinstance(data, dict):
+            labels = data["labels"]
+        else:
+            labels = data
         emb = self.label_embedding(labels)
         if self.encode_position:
             pos = self.pos_embedding(labels)

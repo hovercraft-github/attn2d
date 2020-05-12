@@ -8,6 +8,7 @@ class Aggregator(nn.Module):
         mode = params.get("mode", "max")
         mapping = params.get('mapping', 'linear')
         num_fc = params.get('num_fc', 1)
+        self.aggr_dim = params.get('aggr_dim', 3)
         self.output_channels = input_channls
         if mode == 'mean':
             self.project = average_code
@@ -62,14 +63,14 @@ class Aggregator(nn.Module):
 
     def forward(self, tensor, src_lengths, track=False, *args):
         if not track:
-            proj = self.project(tensor, src_lengths, track, *args)
+            proj = self.project(tensor, src_lengths, dim=self.aggr_dim, track=track, *args)
             proj = proj.permute(0, 2, 1)
             if self.add_lin:
                 return self.lin(proj)
             else:
                 return proj
         else:
-            proj, attn = self.project(tensor, src_lengths, track, *args)
+            proj, attn = self.project(tensor, src_lengths, dim=self.aggr_dim, track=track, *args)
             proj = proj.permute(0, 2, 1)
             if self.add_lin:
                 proj = self.lin(proj)

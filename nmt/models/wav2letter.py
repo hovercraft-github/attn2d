@@ -4,8 +4,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .greedy_decoder import GreedyDecoder
-from .embedding import NullEmbedding
+from .embedding import NullEmbedding, Embedding
 
+def _expand(tensor, dim, reps):
+    # Expand 4D tensor in the source or the target dimension
+    if dim == 1:
+        return tensor.repeat(1, reps, 1, 1)
+        # return tensor.expand(-1, reps, -1, -1)
+    if dim == 2:
+        return tensor.repeat(1, 1, reps, 1)
+        # return tensor.expand(-1, -1, reps, -1)
+    else:
+        raise NotImplementedError
 
 class Wav2Letter(nn.Module):
     """Wav2Letter Speech Recognition model
@@ -74,9 +84,16 @@ class Wav2Letter(nn.Module):
             torch.nn.ReLU(),
             nn.Conv1d(2000, num_classes, 1),
         )
+        self.padding_idx = 1
         self.src_embedding = NullEmbedding(
             params['encoder']
             )
+        self.trg_embedding = Embedding(
+            params['decoder'],
+            num_classes,
+            padding_idx=self.padding_idx
+            )
+
         drpout = params['decoder']['prediction_dropout'] or .0
         self.prediction_dropout = None
         if drpout > 0:
@@ -86,7 +103,7 @@ class Wav2Letter(nn.Module):
         self.src_embedding.init_weights()
 
     def forward(self, data_src, data_trg):
-        """Forward pass through Wav2Letter network than 
+        """Forward pass through Wav2Letter network that
             takes log probability of output
 
         Args:

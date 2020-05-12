@@ -19,12 +19,18 @@ decoder:
   prediction_dropout : .2
 
 network :
-  type: efficient-densenet
+  type: densenet # efficient-densenet
+  merge_mode : product
   growth_rate : 32
   num_layers : 12
   kernels: 3
   conv_dropout : .2
   divide_channels : 1
+  efficient : 1
+
+aggregator:
+  aggr_dim : 2
+
 
 data:
   src : voice
@@ -42,15 +48,19 @@ track:
   checkpoint : 4000
   max_length_a : 0
   max_length_b : 80
+  sample_greedy : 1
 
 optim: 
+  solver : sgd # adam sgd
   seed : 3
-  max_epochs : 16
+  max_epochs : 200
+  weight_decay : 1e-5
+  grad_clip : 1
   LR:
       base : 0.0005
       decay_start : 0
-      decay_every: 4
-      decay_rate : 0.8
+      decay_every: 20
+      decay_rate : 0.95
       patience : 3
       schedule: early-stopping
       criterion : loss

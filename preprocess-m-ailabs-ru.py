@@ -22,16 +22,9 @@ def build_vocab_from_db(max_words, vocab_file):
     sent_lengths = {}
 
     select = """
-        select di.dic_item, count(1) n_times
-        from 
-            (
-            select  regexp_split_to_table(
-                trim(regexp_replace(lower(af.pronounced_text), '[\\'']', '', 'g'))
-                , '') dic_item
-            from 	audio_files af
-            ) di
-        group by di.dic_item
-        order by di.dic_item
+        select 	al.dic_item, al.n_times, al.ac_group
+        from 	alphabet al
+        order by al.ac_group, al.dic_item
         """
     with PgHelper() as pg_object:
         for row in pg_object.exec(select):
@@ -49,28 +42,15 @@ def build_vocab_from_db(max_words, vocab_file):
         for row in pg_object.exec(select):
             sent_lengths[row[0]] = row[1]
 
-    cw = sorted([(count, w) for w, count in counts.items()], reverse=True)
-    print('top dictionary items and their counts:')
-    print('\n'.join(map(str, cw[:20])))
-
     # print some stats
     total_words = sum(counts.values())
-    print('total words:', total_words)
-    vocab = [w for (c, w) in cw[:max_words]]
-    bad_words = [w for (c, w) in cw[max_words:]]
+    print('total letters:', total_words)
+    vocab = [w for w, _ in counts.items()]
 
-    bad_count = sum(counts[w] for w in bad_words)
-    print('number of bad words: %d/%d = %.2f%%' % (len(bad_words), len(counts), len(bad_words)*100.0/len(counts)))
-    print('number of words in vocab would be %d' % (len(vocab), ))
-    print('number of UNKs: %d/%d = %.2f%%' % (bad_count, total_words, bad_count*100.0/total_words))
+    print('number of letters in alphabet would be %d' % (len(vocab), ))
     max_len = max(sent_lengths.keys())
     print('max length sentence in raw data: ', max_len)
-    # print('sentence length distribution (count, number of words):')
-    # sum_len = sum(sent_lengths.values())
-    # for i in range(max_len+1):
-        # print('%2d: %10d   %f%%' % (i, sent_lengths.get(i, 0), sent_lengths.get(i, 0)*100.0/sum_len))
 
-    # additional special UNK token we will use below to map infrequent words to
     print('inserting the special UNK token')
     #vocab.insert(0, "<BOS>")
     #vocab.insert(0, "<EOS>")
@@ -83,7 +63,7 @@ def build_vocab_from_db(max_words, vocab_file):
     # Dump the statistics for later use:
     pdump({"counts": counts,
            "vocab": vocab,
-           "bad words": bad_words,
+           "bad words": 0,
            "lengths": sent_lengths},
           vocab_file + ".stats")
 
@@ -115,7 +95,7 @@ def encode_sentences(sentences, params, wtoi):
     return IL, M, lengths
 
 
-def main_trg(params, train_order, val_order, test_order, vocab=None):
+def main_trg(params):
     """
     Main preprocessing
     """
@@ -130,40 +110,13 @@ def main_trg(params, train_order, val_order, test_order, vocab=None):
     train_trg = 'data/%s/train.%s' % (params.data_dir, params.trg)
     val_trg = 'data/%s/valid.%s' % (params.data_dir, params.trg)
     test_trg = 'data/%s/test.%s' % (params.data_dir, params.trg)
-    if not params.src == 'voice':
-        with open(train_trg, 'r') as f:
-            sentences = f.readlines()
-            sentences = [sent.strip().split()[:max_length] for sent in sentences]
-        print("Read %d lines from %s" % (len(sentences), train_trg))
-    else:
-        with PgHelper() as pg_object:
-            sentences = [row[0].strip()[:max_length] for row in pg_object.exec(select, ('l',))]
-        #sentences = [sent.strip()[:max_length] for sent in sentences]
-    if train_order is not None:
-        sentences = [sentences[k] for k in train_order]
+    with PgHelper() as pg_object:
+        sentences = [row[0].strip()[:max_length] for row in pg_object.exec(select, ('l',))]
+    print("Read %d lines from %s" % (len(sentences), train_trg))
 
-    if vocab is None:
-        vocab_file = "data/%s/vocab.%s" % (params.data_dir, params.trg)
-        if osp.exists(vocab_file):
-            print('...Reading vocabulary file (%s)' % vocab_file)
-            vocab = []
-            for line in open(vocab_file, 'r'):
-                vocab.append(line.strip())
-            # if '<BOS>' not in vocab:
-            #     print('Inserting BOS')
-            #     vocab.insert(0, "<BOS>")
-            # if '<EOS>' not in vocab:
-            #     print('Inserting EOS')
-            #     vocab.insert(0, "<EOS>")
-            if '<UNK>' not in vocab:
-                print('Inserting UNK')
-                vocab.insert(1, "<UNK>")
-            if '<PAD>' not in vocab:
-                print('Inserting PAD')
-                vocab.insert(0, "<PAD>")
-        else:
-            print('...Creating vocabulary of the %d frequent tokens' % params.max_words_trg)
-            vocab = build_vocab_from_db(params.max_words_trg,vocab_file)
+    print('...Creating vocabulary of the %d frequent tokens' % params.max_words_trg)
+    vocab_file = "data/%s/vocab.%s" % (params.data_dir, params.trg)
+    vocab = build_vocab_from_db(params.max_words_trg, vocab_file)
     print('...Vocabulary size:', len(vocab))
     itow = {i: w for i, w in enumerate(vocab)}
     wtoi = {w: i for i, w in enumerate(vocab)}
@@ -171,29 +124,13 @@ def main_trg(params, train_order, val_order, test_order, vocab=None):
     # encode captions in large arrays, ready to ship to hdf5 file
     IL_train, Mask_train, Lengths_train = encode_sentences(sentences, params, wtoi)
 
-    if not params.src == 'voice':
-        with open(val_trg, 'r') as f:
-            sentences = f.readlines()
-            sentences = [sent.strip().split()[:max_length] for sent in sentences]
-    else:
-        with PgHelper() as pg_object:
-            sentences = [row[0].strip()[:max_length] for row in pg_object.exec(select, ('v',))]
-    if val_order is not None:
-        sentences = [sentences[k] for k in val_order]
-
+    with PgHelper() as pg_object:
+        sentences = [row[0].strip()[:max_length] for row in pg_object.exec(select, ('v',))]
     print("Read %d lines from %s" % (len(sentences), val_trg))
     IL_val, Mask_val, Lengths_val = encode_sentences(sentences, params, wtoi)
 
-    if not params.src == 'voice':
-        with open(test_trg, 'r') as f:
-            sentences = f.readlines()
-            sentences = [sent.strip().split()[:max_length] for sent in sentences]
-    else:
-        with PgHelper() as pg_object:
-            sentences = [row[0].strip()[:max_length] for row in pg_object.exec(select, ('t',))]
-    if test_order is not None:
-        sentences = [sentences[k] for k in test_order]
-
+    with PgHelper() as pg_object:
+        sentences = [row[0].strip()[:max_length] for row in pg_object.exec(select, ('t',))]
     print("Read %d lines from %s" % (len(sentences), test_trg))
     IL_test, Mask_test, Lengths_test = encode_sentences(sentences, params, wtoi)
 
@@ -323,6 +260,5 @@ if __name__ == "__main__":
     pdump({'params': params},
           'data/%s/%s.infos' % (params.data_dir, params.src))
 
-    train_order, val_order, test_order = None, None, None
     print('\nTarget language: ', params.trg)
-    main_trg(params, train_order, val_order, test_order)
+    main_trg(params)

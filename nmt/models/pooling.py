@@ -11,7 +11,7 @@ __all__ = ['truncated_max', "truncated_mean",
           ]
 
 
-def truncated_max(tensor, src_lengths, track=False, *args):
+def truncated_max(tensor, src_lengths, dim=3, track=False, *args):
     """
     Max-pooling up to effective legth
     """
@@ -21,7 +21,7 @@ def truncated_max(tensor, src_lengths, track=False, *args):
     Attention = []
     for n in range(tensor.size(0)):
         X = tensor[n]
-        xpool, attn = X[:, :, :src_lengths[n]].max(dim=2)
+        xpool, attn = X[:, :, :src_lengths[n]].max(dim=dim-1)
         if track:
             targets = torch.arange(src_lengths[n])
             align = targets.apply_(lambda k: sum(attn[:, -1] == k))
@@ -34,7 +34,7 @@ def truncated_max(tensor, src_lengths, track=False, *args):
     return result
 
 
-def truncated_mean(tensor, src_lengths, *args):
+def truncated_mean(tensor, src_lengths, dim=3, *args):
     """
     Average-pooling up to effective legth
     """
@@ -46,7 +46,7 @@ def truncated_mean(tensor, src_lengths, *args):
     Attention = []
     for n in range(tensor.size(0)):
         X = tensor[n]
-        xpool = X[:, :, :src_lengths[n]].mean(dim=2)
+        xpool = X[:, :, :src_lengths[n]].mean(dim=dim-1)
         xpool *=  math.sqrt(src_lengths[n])
         Pool.append(xpool.unsqueeze(0))
     result = torch.cat(Pool, dim=0)
@@ -57,12 +57,12 @@ def average_code(tensor, *args):
     return tensor.mean(dim=3)
 
 
-def max_code(tensor, src_lengths=None, track=False):
+def max_code(tensor, src_lengths=None, dim=3, track=False):
     # input size: N, d, Tt, Ts
     # src_lengths : N, 1
     if track:
         batch_size, nchannels, _, max_len = tensor.size()
-        xpool, attn = tensor.max(dim=3)
+        xpool, attn = tensor.max(dim=dim)
         targets = torch.arange(max_len).type_as(attn)
         align = []
         activ_distrib = []
@@ -89,7 +89,8 @@ def max_code(tensor, src_lengths=None, track=False):
         activ_distrib = np.array(activ_distrib)
         return xpool, (None, align, activ_distrib, activ)
     else:
-        return tensor.max(dim=3)[0]
+        ret = tensor.max(dim=dim)
+        return ret[0]
 
 
 class MaxAttention(nn.Module):

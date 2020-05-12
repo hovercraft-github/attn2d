@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from .densenet import DenseNet
 from .efficient_densenet import Efficient_DenseNet
 from .log_efficient_densenet import Log_Efficient_DenseNet
+#from torchvision.models import DenseNet
 
 from .aggregator import Aggregator
 from .embedding import Embedding, ConvEmbedding, NullEmbedding
@@ -39,6 +40,7 @@ class Pervasive(nn.Module):
         self.merge_mode  = params['network'].get('merge_mode', 'concat')
         self.src_vocab_size = src_vocab_size
         self.trg_vocab_size = trg_vocab_size
+        self.trg_emb_pad_idx = special_tokens['UNK']
         self.padding_idx = special_tokens['PAD']
         self.mask_version = params.get('mask_version', -1)
         # assert self.padding_idx == 0, "Padding token should be 0"
@@ -61,9 +63,7 @@ class Pervasive(nn.Module):
                 )
         elif params['encoder']['type'] == None:
             self.src_embedding = NullEmbedding(
-                params['encoder'],
-                src_vocab_size,
-                padding_idx=self.padding_idx
+                params['encoder']
                 )
         self.logger.info('Src embeding num. model params: %d', sum(p.data.numel()
                                              for p in self.src_embedding.parameters()))
@@ -71,7 +71,7 @@ class Pervasive(nn.Module):
         self.trg_embedding = Embedding(
             params['decoder'],
             trg_vocab_size,
-            padding_idx=self.padding_idx,
+            padding_idx=self.trg_emb_pad_idx,
             pad_left=True
             )
         self.logger.info('Trgt embeding num. model params: %d', sum(p.data.numel()
@@ -140,22 +140,27 @@ class Pervasive(nn.Module):
         else:
             last_dim = None
 
-        self.aggregator = Aggregator(self.network_output_channels,
-                                     last_dim,
-                                     params['aggregator'])
-        self.final_output_channels = self.aggregator.output_channels  # d_h
+        # self.aggregator = Aggregator(self.network_output_channels,
+        #                              last_dim,
+        #                              params['aggregator'])
+        # self.final_output_channels = self.aggregator.output_channels  # d_h
+        self.final_output_channels = self.network_output_channels
 
         self.prediction_dropout = None
         drpout = params['decoder']['prediction_dropout'] or .0
         if drpout > 0:
             self.prediction_dropout = nn.Dropout(drpout)
         self.logger.info('Output channels: %d', self.final_output_channels)
-        self.prediction = nn.Linear(self.final_output_channels,
-                                    self.trg_vocab_size)
+
+        # self.prediction = nn.Linear(self.final_output_channels,
+        #                             self.trg_vocab_size)
+        # if self.tie_target_weights:
+        #     self.prediction.weight = self.trg_embedding.label_embedding.weight
+
+        self.prediction = nn.Conv2d(self.final_output_channels, 1, 1)
+
         if self.copy_source_weights:
             self.trg_embedding.label_embedding.weight = self.src_embedding.label_embedding.weight
-        if self.tie_target_weights:
-            self.prediction.weight = self.trg_embedding.label_embedding.weight
 
     def init_weights(self):
         """
@@ -223,45 +228,84 @@ class Pervasive(nn.Module):
         else:
             raise ValueError('Unknown merging mode')
 
+    def trg2alphabet(self, data_src, data_trg):
+        batch_size = data_src["labels"].size(0)
+        Ts = data_src["labels"].size(1)  # source sequence length
+        Tt = data_trg["labels"].size(1)  # target sequence length
+        alphabet_size = self.trg_vocab_size
+        a = torch.arange(Ts*Tt).cuda().view(Ts, Tt)
+        a = a.unsqueeze(0).repeat(batch_size,1,1)
+        mask = ((a // Tt).int() <= ((a % Tt) * 1.2).int() + 3)
+        mask *= ((a // Tt).int() >= ((a % Tt) * 0.8).int() - 2)
+        labels = data_trg["labels"].unsqueeze(1).repeat(1, Ts, 1)
+        labels *= mask
+        #print((mask[5, :, :] > 0).sum())
+        #print((labels[5, :, :] > 0).sum())
+        alphabet = torch.arange(alphabet_size, device='cuda').unsqueeze(0).repeat(batch_size,1)
+        alphabet = alphabet.unsqueeze(1).repeat(1, Ts, 1)
+        indexes = torch.unique(labels, sorted=False, dim=2)
+
+        ix_rows = torch.arange(Ts*batch_size, dtype=int, device='cuda').unsqueeze(1).repeat(1, indexes.size(2))
+        ix_rows *= alphabet_size
+        ix_rows = ix_rows.view_as(indexes)
+
+        ix = indexes + ix_rows
+        ix = torch.flatten(ix).unique()
+        ab_mask = torch.zeros_like(alphabet)
+        ab_mask = torch.flatten(ab_mask)
+        ab_mask.index_fill_(0, ix, 1)
+        ab_mask = ab_mask.view_as(alphabet)
+        alphabet *= ab_mask
+        #print((alphabet[5, :, :] > 0).sum())
+        alphabet[alphabet == 0] = self.trg_emb_pad_idx
+        alphabet[:, :, 0] = self.padding_idx
+        return self.trg_embedding(alphabet)
+
     # @profile
     def forward(self, data_src, data_trg):
         src_emb = self.src_embedding(data_src)
-        trg_emb = self.trg_embedding(data_trg)
+        #trg_emb = self.trg_embedding(data_trg)
+        trg_emb = self.trg2alphabet(data_src, data_trg)
         Ts = src_emb.size(1)  # source sequence length
-        Tt = trg_emb.size(1)  # target sequence length
+        #Tt = trg_emb.size(1)  # target sequence length
+        Tt = trg_emb.size(2)  # target sequence length
         # 2d grid:
         src_emb = _expand(src_emb.unsqueeze(1), 1, Tt)
-        trg_emb = _expand(trg_emb.unsqueeze(2), 2, Ts)
+        #trg_emb = _expand(trg_emb.unsqueeze(2), 2, Ts)
+        trg_emb = trg_emb.permute(0, 2, 1, 3)
         X = self.merge(src_emb, trg_emb)
         # del src_emb, trg_emb
-        X = self._forward(X, data_src['lengths'])
-        if not self.prediction_dropout == None:
-            logits = F.log_softmax(
-                self.prediction(self.prediction_dropout(X)), dim=2)
-        else:
-            logits = F.log_softmax(
-                self.prediction(X), dim=2)
+        Y = self._forward(X, data_src['lengths'])
+        # if not self.prediction_dropout == None:
+        #     logits = F.log_softmax(
+        #         self.prediction(self.prediction_dropout(X)), dim=2)
+        # else:
+        #     logits = F.log_softmax(
+        #         self.prediction(X), dim=2)
+        logits = F.log_softmax(Y, dim=2)
         return logits
 
     # @profile
     def _forward(self, X, src_lengths=None, track=False):
         X = X.permute(0, 3, 1, 2)
         X = self.net(X)
-        if track:
-            X, attn = self.aggregator(X, src_lengths, track=True)
-            return X, attn
-        X = self.aggregator(X, src_lengths, track=track)
-        return X
+        Y = self.prediction(X).squeeze(1).transpose(2,1)
+        return Y
+        # if track:
+        #     X, attn = self.aggregator(X, src_lengths, track=True)
+        #     return X, attn
+        # Y = self.aggregator(X, src_lengths, track=track)
+        # return Y
 
-    def update(self, X, src_lengths=None, track=False):
-        X = X.permute(0, 3, 1, 2)
-        X = self.net.update(X)
-        attn = None
-        if track:
-            X, attn = self.aggregator(X, src_lengths, track=track)
-        else:
-            X = self.aggregator(X, src_lengths, track=track)
-        return X, attn
+    # def update(self, X, src_lengths=None, track=False):
+    #     X = X.permute(0, 3, 1, 2)
+    #     X = self.net.update(X)
+    #     attn = None
+    #     if track:
+    #         X, attn = self.aggregator(X, src_lengths, track=track)
+    #     else:
+    #         X = self.aggregator(X, src_lengths, track=track)
+    #     return X, attn
 
     def track_update(self, data_src, kwargs={}):
         """
@@ -456,10 +500,32 @@ class Pervasive(nn.Module):
         self.trg_embedding.reset_buffers()
         return seq, None
 
+    def sample_greedy(self, data_src, kwargs={}):
+        """
+        Sample in evaluation mode: greedy
+        """
+        batch_size = data_src['labels'].size(0)
+        src_emb = self.src_embedding(data_src)
+        Ts = src_emb.size(1)  # source sequence length
+        trg_labels = torch.arange(self.trg_vocab_size, device='cuda').unsqueeze(0).repeat(batch_size, 1)
+        trg_emb = self.trg_embedding(trg_labels)
+        Ts = src_emb.size(1)  # source sequence length
+        Tt = trg_emb.size(1)  # target sequence length
+        # 2d grid:
+        src_emb = _expand(src_emb.unsqueeze(1), 1, Tt)
+        trg_emb = _expand(trg_emb.unsqueeze(2), 2, Ts)
+        X = self.merge(src_emb, trg_emb)
+        Y = self._forward(X, data_src['lengths'])
+        logits = F.log_softmax(Y, dim=2)
+        seq = torch.topk(logits, 1, dim=2)[1].squeeze()
+        return seq, None
+
     def sample(self, data_src, scorer, kwargs={}):
         """
         Sample in evaluation mode
         """
+        if kwargs.get('sample_greedy', 1) > 0:
+            return self.sample_greedy(data_src, kwargs)
         beam_size = kwargs.get('beam_size', 1)
         if beam_size > 1:
             return self.sample_beam(data_src, kwargs)

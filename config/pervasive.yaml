@@ -48,6 +48,7 @@ aggregator:
   nonlin : none 
   mapping: linear
   map_embeddings : none
+  aggr_dim : 3
 
 
 loss:
