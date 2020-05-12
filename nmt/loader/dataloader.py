@@ -4,6 +4,7 @@ import h5py
 import numpy as np
 import torch
 from nmt.utils import pload
+import math
 
 class textDataLoader(object):
     """
@@ -12,6 +13,7 @@ class textDataLoader(object):
     def __init__(self, params, jobname):
         self.logger = logging.getLogger(jobname)
         self.src = params.get('src', None)
+        self.src_trg_ratio = float(params.get('src_trg_ratio', 1.2))
         if self.src == 'voice':
             self.ix_to_word = None
             self.vocab_size = 0
@@ -105,22 +107,24 @@ class textDataLoader(object):
             len_batch.append(min(self.h5_file[len_pointer][ri],
                                  self.seq_length))
 
-        order = sorted(range(batch_size), key=lambda k: -len_batch[k])
+        #order = sorted(range(batch_size), key=lambda k: -len_batch[k])
 
         data = {}
         data['labels'] = torch.from_numpy(
-            label_batch[order, :max(len_batch)]
+            #label_batch[order, :max(len_batch)]
+            label_batch[:, :max(len_batch)]
         ).cuda()
 
         data['lengths'] = torch.from_numpy(
-            np.array([len_batch[k] for k in order]).astype(int)
+            #np.array([len_batch[k] for k in order]).astype(int)
+            np.array(len_batch).astype(int)
         ).cuda()
 
         data['bounds'] = {'it_pos_now': self.iterators[split],
                           'it_max': max_index, 'wrapped': wrapped}
-        return data, order
+        return data, data['lengths']
 
-    def get_trg_batch(self, split, order, batch_size=None):
+    def get_trg_batch(self, split, src_len_batch, batch_size=None):
         batch_size = batch_size or self.batch_size
         in_label_batch = np.zeros([batch_size, self.seq_length + 1], dtype='int')
         out_label_batch = np.zeros([batch_size, self.seq_length + 1], dtype='int')
@@ -144,21 +148,28 @@ class textDataLoader(object):
             full_str = self.h5_file[pointer][ri, :self.seq_length]
             no_blanks = full_str[full_str != self.blank]
             ll = len(no_blanks)
-            #in_label_batch[i, 0:ll] = no_blanks
-            in_label_batch[i, 1:ll+1] = no_blanks
+            if ll >= src_len_batch[i]:
+                ll = (src_len_batch[i] // self.src_trg_ratio).int().cpu()
+            in_label_batch[i, 1:ll+1] = no_blanks[0:ll]
             # add <eos>
             # ll = min(self.seq_length, self.h5_file[len_pointer][ri])
-            len_batch.append(ll + 1)
+            len_batch.append(ll)
             out_label_batch[i] = np.insert(in_label_batch[i, 1:], ll, self.eos)
             #len_batch.append(ll)
             #out_label_batch[i] = in_label_batch[i]
 
         data = {}
-        data['labels'] = torch.from_numpy(in_label_batch[order, :max(len_batch)]).cuda()
-        data['out_labels'] = torch.from_numpy(out_label_batch[order, :max(len_batch)]).cuda()
+        # data['labels'] = torch.from_numpy(in_label_batch[order, :max(len_batch)]).cuda()
+        # data['out_labels'] = torch.from_numpy(out_label_batch[order, :max(len_batch)]).cuda()
+        # data['lengths'] = torch.from_numpy(
+        #     np.array([len_batch[k] for k in order]).astype(int)
+        # ).cuda()
+        data['labels'] = torch.from_numpy(in_label_batch[:, :max(len_batch) + 1]).cuda()
+        data['out_labels'] = torch.from_numpy(out_label_batch[:, :max(len_batch)]).cuda()
         data['lengths'] = torch.from_numpy(
-            np.array([len_batch[k] for k in order]).astype(int)
+            np.array(len_batch).astype(int)
         ).cuda()
+        data['src_lengths'] = src_len_batch
 
         data['bounds'] = {'it_pos_now': self.iterators[split],
                           'it_max': max_index, 'wrapped': wrapped}
