@@ -55,6 +55,8 @@ def train(params):
 
     pass_no = 0
 
+    # logger.warning("xy_ratio=%f", model.xy_ratio_ctc.sigmoid().squeeze()+1.0)
+
     if trainer.lr_patient:
         trainer.update_params()
     while True:
@@ -105,6 +107,7 @@ def train(params):
                                     bos=trg_loader.bos)
                     for (l, gl) in zip(sent_preds, sent_gold):
                         lg.print_sampled(gl, l)
+                    # logger.warning("xy_ratio=%f", model.xy_ratio_ctc.sigmoid().squeeze()+1.0)
 
 
         avg_loss /= total_ntokens

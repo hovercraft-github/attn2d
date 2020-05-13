@@ -52,29 +52,65 @@ class CTCCriterion(nn.Module):
         self.ctc_loss = nn.CTCLoss(blank=0, zero_infinity=False, reduction='mean').cuda()
         # for param in self.parameters():
         #     param.requires_grad = False
+        # self.xy_ratio = torch.nn.Parameter(torch.rand(1, requires_grad=True, device='cuda'))
 
     def log(self):
         self.logger.info('CTC loss')
+        ['out_labels']
+
+    def _forward_guess_len(self, logp, target, xy_ratio_):
+        """
+        logp : the decoder logits (N, seq_length, V)
+        target : the ground truth labels (N, seq_length)
+        """
+        src_length = logp.size(1)
+        if xy_ratio_ == None:
+            xy_ratio = 1.7 #2.5
+        else:
+            xy_ratio = xy_ratio_.sigmoid()+1.0
+        #xy_ratio = 1.6
+        labels = target[:, :math.floor(src_length // xy_ratio)]
+        y_lengths = (labels > self.th_mask).sum(dim=1, dtype=torch.int32).cpu()
+        labels = to_contiguous(labels).view(-1)
+        labels = labels[(labels > self.th_mask).nonzero()].int()
+        labels = to_contiguous(labels.squeeze().cpu())
+
+        x_lengths = (y_lengths * xy_ratio).int() #math.floor
+        x_lengths[(x_lengths > src_length).nonzero()] = src_length
+
+        logp = to_contiguous(logp.permute(1, 0, 2))
+
+        output = self.ctc_loss(logp, labels, x_lengths, y_lengths)
+
+        if torch.isinf(output).any() or torch.isnan(output).any():
+            output.data.copy_(torch.tensor(1000.0).data)
+        return {"final": output, "ml": output}, {}
 
     def forward(self, logp, target):
         """
         logp : the decoder logits (N, seq_length, V)
         target : the ground truth labels (N, seq_length)
         """
+        # if isinstance(target, dict):
+        #     return self._forward_guess_len(logp, target['out_labels'], xy_ratio)
         #batch_size = logp.size(0)
-        src_length = logp.size(1)
-        xy_ratio = 2.5
+        # src_length = logp.size(1)
+        # xy_ratio = 2.5
         #vocab = logp.size(2)
-        #labels = to_contiguous(target)
-        labels = target[:, :math.floor(src_length // xy_ratio)]
-        y_lengths = (labels > self.th_mask).sum(dim=1, dtype=torch.int32).cpu() #.int().cpu()
+        labels = target['out_labels']
+        y_lengths = to_contiguous(target['lengths'].int()).cpu()
+        x_lengths = to_contiguous(target['src_lengths'].int()).cpu()
+        x_s = x_lengths.sum().float()
+        y_s = y_lengths.sum().float()
+        xy_ratio = x_s / y_s
+        return self._forward_guess_len(logp, target['out_labels'], xy_ratio)
+
+        #y_lengths_ = (labels > self.th_mask).sum(dim=1, dtype=torch.int32).cpu()
         labels = to_contiguous(labels).view(-1)
         labels = labels[(labels > self.th_mask).nonzero()].int()
         labels = to_contiguous(labels.squeeze().cpu())
 
         #x_lengths = torch.full((batch_size,), src_length, dtype=torch.int32, device='cpu')  # Length of inputs
-        x_lengths = (y_lengths * xy_ratio).int() #math.floor
-        x_lengths[(x_lengths > src_length).nonzero()] = src_length
 
         logp = to_contiguous(logp.permute(1, 0, 2))
 
@@ -109,7 +145,7 @@ class MLCriterion(nn.Module):
         logp : the decoder logits (N, seq_length, V)
         target : the ground truth labels (N, seq_length)
         """
-        output = self.get_ml_loss(logp, target)
+        output = self.get_ml_loss(logp, target['out_labels'])
         return {"final": output, "ml": output}, {}
 
     def get_ml_loss(self, logp, target):

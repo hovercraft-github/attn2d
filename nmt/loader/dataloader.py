@@ -146,7 +146,8 @@ class textDataLoader(object):
             in_label_batch[i, 0] = self.bos
             # in_label_batch[i, 1:] = self.h5_file[pointer][ri, :self.seq_length]
             full_str = self.h5_file[pointer][ri, :self.seq_length]
-            no_blanks = full_str[full_str != self.blank]
+            no_blanks = full_str[(full_str != self.blank).nonzero()]
+            no_blanks = no_blanks[(no_blanks > self.unk).nonzero()]
             ll = len(no_blanks)
             if ll >= src_len_batch[i]:
                 ll = (src_len_batch[i] // self.src_trg_ratio).int().cpu()

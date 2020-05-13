@@ -44,6 +44,10 @@ class Trainer(object):
 
         # Initialize optimizer and LR scheduler
         self.optimizer = Optimizer(params['optim'], model)
+        # if self.criterion.version == 'ctc':
+        #     #self.optimizer.optimizer.param_groups.append({'params': self.criterion.xy_ratio })
+        #     self.optimizer.optimizer.add_param_group({'params': self.criterion.xy_ratio })
+        #     #print("optimizer params: ", self.optimizer.optimizer.param_groups)
         self.lr_patient = params['optim']['LR']['schedule'] == "early-stopping"
         if self.lr_patient:
             self.lr_patient = params['optim']['LR']['criterion']
@@ -90,7 +94,8 @@ class Trainer(object):
         batch_size = data_src['labels'].size(0)
         # evaluate the loss
         decoder_logit = self.model(data_src, data_trg)
-        losses, stats = self.criterion(decoder_logit, data_trg['out_labels'])
+        #losses, stats = self.criterion(decoder_logit, data_trg['out_labels'])
+        losses, stats = self.criterion(decoder_logit, data_trg)
         if not ntokens:
             ntokens = torch.sum(data_src['lengths'] *
                                 data_trg['lengths']).data.item()

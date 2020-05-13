@@ -46,6 +46,8 @@ class Pervasive(nn.Module):
         # assert self.padding_idx == 0, "Padding token should be 0"
         self.bos_token = special_tokens['BOS']
         self.eos_token = special_tokens['EOS']
+        # self.xy_ratio_ctc = torch.nn.Parameter(torch.rand(1, requires_grad=True, device='cuda'))
+        # self.register_parameter('xy_ratio_ctc_p', self.xy_ratio_ctc)
         self.kernel_size = max(list(itertools.chain.from_iterable(
             params['network']['kernels']
             )))
@@ -235,8 +237,10 @@ class Pervasive(nn.Module):
         alphabet_size = self.trg_vocab_size
         a = torch.arange(Ts*Tt).cuda().view(Ts, Tt)
         a = a.unsqueeze(0).repeat(batch_size,1,1)
-        mask = ((a // Tt).int() <= ((a % Tt) * 1.2).int() + 3)
-        mask *= ((a // Tt).int() >= ((a % Tt) * 0.8).int() - 2)
+        # mask = ((a // Tt).int() <= ((a % Tt) * 1.2).int() + 3)
+        # mask *= ((a // Tt).int() >= ((a % Tt) * 0.8).int() - 2)
+        mask = ((a // Tt).int() <= ((a % Tt) * 2.5).int() + 3)
+        mask *= ((a // Tt).int() >= ((a % Tt) * 1.0).int() - 2)
         labels = data_trg["labels"].unsqueeze(1).repeat(1, Ts, 1)
         labels *= mask
         #print((mask[5, :, :] > 0).sum())

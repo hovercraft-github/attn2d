@@ -129,6 +129,7 @@ class Optimizer(object):
         super().__init__()
         #  rmsprop | sgd | sgdmom | adagrad | adam
         ref = opt['solver'].lower()
+        self.ref = ref
         lr = opt['LR']['base']
         if isinstance(model, list):
             params = [{'params': m.parameters(),

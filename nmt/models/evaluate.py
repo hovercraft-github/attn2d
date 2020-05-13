@@ -200,7 +200,8 @@ def evaluate_model(job_name, trainer, src_loader, trg_loader, eval_kwargs):
         n += batch_size
         if model.version == 'fair':
             logp = model(data_src, data_trg) #shape=N,T,C
-            losses, stats = crit(logp, data_trg['out_labels'])
+            #losses, stats = crit(logp, data_trg['out_labels'])
+            losses, stats = crit(logp, data_trg)
             batch_preds = model.sample(logp)
         elif model.version == 'seq2seq':
             source = model.encoder(data_src)
@@ -210,10 +211,12 @@ def evaluate_model(job_name, trainer, src_loader, trg_loader, eval_kwargs):
             else:  # ML & Token-level
                 # init and forward decoder combined
                 decoder_logit = model.decoder(source, data_trg)
-                losses, stats = crit(decoder_logit, data_trg['out_labels'])
+                #losses, stats = crit(decoder_logit, data_trg['out_labels'])
+                losses, stats = crit(decoder_logit, data_trg)
             batch_preds, _ = model.sample(source, None, eval_kwargs)
         else:
-            losses, stats = crit(model(data_src, data_trg), data_trg['out_labels'])
+            #losses, stats = crit(model(data_src, data_trg), data_trg['out_labels'])
+            losses, stats = crit(model(data_src, data_trg), data_trg)
             batch_preds, _ = model.sample(data_src, None, eval_kwargs)
 
         loss_sum += losses['final'].data.item()
