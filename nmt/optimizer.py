@@ -1,5 +1,5 @@
 from math import sqrt, pi, cos, ceil
-from torch import optim
+from torch import optim, nn
 from torch.optim import lr_scheduler
 
 
@@ -121,6 +121,36 @@ class NAG(optim.Optimizer):
 
         return loss
 
+def group_weight_n(module):
+    group_decay = []
+    group_no_decay = []
+    for n,m in module.named_parameters():
+        #if 'trg_embedding.label_embedding.weight' in n:
+        if 'embedding' in n:
+            group_no_decay.append(m)
+        else:
+            group_decay.append(m)
+    assert len(list(module.parameters())) == len(group_decay) + len(group_no_decay)
+    groups = [dict(params=group_decay), dict(params=group_no_decay, weight_decay=.0)]
+    return groups
+
+def group_weight(model):
+    group_decay = []
+    group_no_decay = []
+    for m in model.modules():
+        if isinstance(m, nn.Embedding):
+            group_no_decay.append(m.weight)
+            if m.bias is not None:
+                group_no_decay.append(m.bias)
+        else:
+            if m.weight is not None:
+                group_decay.append(m.weight)
+            if m.bias is not None:
+                group_decay.append(m.bias)
+    assert len(list(model.parameters())) == len(group_decay) + len(group_no_decay)
+    groups = [dict(params=group_decay), dict(params=group_no_decay, weight_decay=.0)]
+    return groups
+
 class Optimizer(object):
     """
     Wrapper for the optimizer (fairseq style)
@@ -137,7 +167,8 @@ class Optimizer(object):
                       for m in model]
         else:
             #params = [{'params': model.parameters(), 'lr': lr}]
-            params = model.parameters()
+            # params = model.parameters()
+            params = group_weight_n(model)
 
         weight_decay = float(opt['weight_decay'])
         if ref == 'adam':

@@ -13,7 +13,6 @@ class textDataLoader(object):
     def __init__(self, params, jobname):
         self.logger = logging.getLogger(jobname)
         self.src = params.get('src', None)
-        self.src_trg_ratio = float(params.get('src_trg_ratio', 1.2))
         if self.src == 'voice':
             self.ix_to_word = None
             self.vocab_size = 0
@@ -24,7 +23,7 @@ class textDataLoader(object):
         self.ref = params["h5"]
         self.logger.info('Loading h5 file: %s' % params['h5'])
         self.logger.info('...Vocab size is %d ' % self.vocab_size)
-        self.h5_file = h5py.File(params['h5'])
+        self.h5_file = h5py.File(params['h5'], 'r')
         raw = params.get('raw', False)
         self.label_dimensions = 2
         self.label_depth = 1
@@ -54,8 +53,14 @@ class textDataLoader(object):
             self.iterators = {'full': 0}
 
         self.batch_size = params['batch_size']
-        self.seq_length = params['max_length']
-        self.logger.warning('...Reading sequences up to %d', self.seq_length)
+        # seq_length = params['max_length']
+        # self.logger.warning('...Reading sequences up to %d', seq_length)
+        self.max_src_length = params['max_src_length']
+        self.max_trg_length = params['max_trg_length']
+        if 'src_trg_ratio' in params:
+            self.src_trg_ratio = float(params['src_trg_ratio'])
+        else:
+            self.src_trg_ratio = float(self.max_src_length) / float(self.max_trg_length)
         if not self.ix_to_word == None:
             word_to_ix = {w: ix for ix, w in self.ix_to_word.items()}
             self.pad = word_to_ix['<PAD>']
@@ -82,15 +87,13 @@ class textDataLoader(object):
     def get_vocab(self):
         return self.ix_to_word
 
-    def get_seq_length(self):
-        return self.seq_length
+    # def get_seq_length(self):
+    #     return self.seq_length
 
     def get_src_batch(self, split, batch_size=None):
+        seq_length = self.max_src_length
         batch_size = batch_size or self.batch_size
-        if self.src == 'voice':
-            label_batch = np.zeros([batch_size, self.seq_length, self.label_depth], dtype='float32')
-        else:
-            label_batch = np.zeros([batch_size, self.seq_length], dtype='int')
+        label_batch = np.zeros([batch_size, seq_length, self.label_depth], dtype='float32')
         len_batch = []
         pointer = 'labels_%s' % split
         len_pointer = 'lengths_%s' % split
@@ -103,9 +106,8 @@ class textDataLoader(object):
                 ri_next = 0
                 wrapped = True
             self.iterators[split] = ri_next
-            label_batch[i] = self.h5_file[pointer][ri, :self.seq_length]
-            len_batch.append(min(self.h5_file[len_pointer][ri],
-                                 self.seq_length))
+            label_batch[i] = self.h5_file[pointer][ri, :seq_length]
+            len_batch.append(min(self.h5_file[len_pointer][ri], seq_length))
 
         #order = sorted(range(batch_size), key=lambda k: -len_batch[k])
 
@@ -125,11 +127,16 @@ class textDataLoader(object):
         return data, data['lengths']
 
     def get_trg_batch(self, split, src_len_batch, batch_size=None):
+        seq_length = self.max_trg_length
         batch_size = batch_size or self.batch_size
-        in_label_batch = np.zeros([batch_size, self.seq_length + 1], dtype='int')
-        out_label_batch = np.zeros([batch_size, self.seq_length + 1], dtype='int')
-        #in_label_batch = np.zeros([batch_size, self.seq_length], dtype='int')
-        #out_label_batch = np.zeros([batch_size, self.seq_length], dtype='int')
+        in_label_batch = np.zeros([batch_size, seq_length + 1], dtype='int')
+        out_label_batch = np.zeros([batch_size, seq_length + 1], dtype='int')
+        max_src_length = min(max(src_len_batch), self.max_src_length)
+        if split == 'train':
+            # max_src_length = self.h5_file['masks_train'].shape[1]
+            alphabet_size = self.h5_file['masks_train'].shape[2]
+            #masks_train_batch = np.zeros([batch_size, max_src_length, alphabet_size], dtype='int')
+            masks_train_batch = np.ones([batch_size, max_src_length, alphabet_size], dtype='int')
         len_batch = []
         pointer = 'labels_%s' % split
         len_pointer = 'lengths_%s' % split
@@ -144,33 +151,29 @@ class textDataLoader(object):
             self.iterators[split] = ri_next
             # add <bos>
             in_label_batch[i, 0] = self.bos
-            # in_label_batch[i, 1:] = self.h5_file[pointer][ri, :self.seq_length]
-            full_str = self.h5_file[pointer][ri, :self.seq_length]
+            # in_label_batch[i, 1:] = self.h5_file[pointer][ri, :seq_length]
+            src_len = min(src_len_batch[i], max_src_length)
+            if split == 'train':
+                masks_train_batch[i] = self.h5_file['masks_train'][ri, :src_len, :]
+            full_str = self.h5_file[pointer][ri, :seq_length]
             no_blanks = full_str[(full_str != self.blank).nonzero()]
             no_blanks = no_blanks[(no_blanks > self.unk).nonzero()]
             ll = len(no_blanks)
-            if ll >= src_len_batch[i]:
-                ll = (src_len_batch[i] // self.src_trg_ratio).int().cpu()
+            if ll >= src_len:
+                ll = (src_len // self.src_trg_ratio).int().cpu()
             in_label_batch[i, 1:ll+1] = no_blanks[0:ll]
-            # add <eos>
-            # ll = min(self.seq_length, self.h5_file[len_pointer][ri])
             len_batch.append(ll)
             out_label_batch[i] = np.insert(in_label_batch[i, 1:], ll, self.eos)
-            #len_batch.append(ll)
-            #out_label_batch[i] = in_label_batch[i]
 
         data = {}
-        # data['labels'] = torch.from_numpy(in_label_batch[order, :max(len_batch)]).cuda()
-        # data['out_labels'] = torch.from_numpy(out_label_batch[order, :max(len_batch)]).cuda()
-        # data['lengths'] = torch.from_numpy(
-        #     np.array([len_batch[k] for k in order]).astype(int)
-        # ).cuda()
         data['labels'] = torch.from_numpy(in_label_batch[:, :max(len_batch) + 1]).cuda()
         data['out_labels'] = torch.from_numpy(out_label_batch[:, :max(len_batch)]).cuda()
         data['lengths'] = torch.from_numpy(
             np.array(len_batch).astype(int)
         ).cuda()
         data['src_lengths'] = src_len_batch
+        if split == 'train':
+            data['masks_train'] = torch.from_numpy(masks_train_batch).cuda()
 
         data['bounds'] = {'it_pos_now': self.iterators[split],
                           'it_max': max_index, 'wrapped': wrapped}

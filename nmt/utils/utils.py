@@ -57,16 +57,11 @@ def decode_sequence(ix_to_word, seq, eos, bos, remove_bpe=0):
         txt = []
         for j in range(T):
             ix = seq[i, j].item()
-            if ix > 0 and not ix == eos:
-                if ix == bos:
-                    continue
-                else:
-                    txt.append(ix_to_word[ix])
-            else:
-                break
+            if ix > 1 and ix != eos and ix != bos:
+                txt.append(ix_to_word[ix])
         sent = "".join(txt)
-        if remove_bpe:
-            sent = sent.replace('@@ ', '')
+        # if remove_bpe:
+        #     sent = sent.replace('@@ ', '')
         out.append(sent)
     return out
 

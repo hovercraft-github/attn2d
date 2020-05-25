@@ -91,16 +91,22 @@ class Embedding(nn.Module):
         self.encode_length = params['encode_length']
         self.encode_position = params['encode_position']
         self.dropout = params['input_dropout']
-        self.init_std = params.get('init_std', .01)
+        self.init_std = params.get('init_std', 1)
         self.zero_pad = params.get('zero_pad', 0)
+        self.max_norm = float(params.get('max_norm', 0))
+        self.scale_grad_by_freq = False
+        if params.get('scale_grad_by_freq', 0) > 0:
+            self.scale_grad_by_freq = True
         self.padding_idx = padding_idx
         # self.normalize = params.get('normalize', 0)
         self.label_embedding = nn.Embedding(
             vocab_size,
             self.dimension,
             padding_idx,
-            scale_grad_by_freq=False
+            scale_grad_by_freq=self.scale_grad_by_freq,
+            max_norm=self.max_norm
         )
+        self.label_embedding.weight.requires_grad_(False)
 
         if self.encode_position:
             self.pos_embedding = PosEmbedding(params['max_length'],
@@ -115,7 +121,8 @@ class Embedding(nn.Module):
 
     def init_weights(self):
         std = self.init_std
-        self.label_embedding.weight.data.normal_(0, std)
+        #self.label_embedding.weight.data.normal_(0, std)
+        self.label_embedding.weight.data.fill_(1)
         # fill padding with zero (default in pytorch if not reinitializing)
         if self.zero_pad:
             self.label_embedding.weight.data[self.padding_idx].fill_(0)

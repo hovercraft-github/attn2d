@@ -9,6 +9,7 @@ import logging
 import json
 import time
 import numpy as np
+import visdom
 
 import torch
 from tensorboardX import SummaryWriter
@@ -37,6 +38,7 @@ class Trainer(object):
 
         self.clip_norm = params['optim']['grad_clip']
         self.num_batches = params['optim']['num_batches']
+        self.isnan_trick = params['optim'].get('isnan_trick', None)
 
         # Move to GPU
         self.model = model.cuda()
@@ -66,6 +68,7 @@ class Trainer(object):
         self.epoch = 0
         self.batch_offset = 0
         self.pass_no = 0
+        self.vis = visdom.Visdom()
         # Dump  the model params:
         json.dump(params, open('%s/params.json' % params['modelname'], 'w'))
 
@@ -90,7 +93,7 @@ class Trainer(object):
         A signle forward step
         """
         # Clear the grads
-        self.optimizer.zero_grad()
+        #self.optimizer.zero_grad()
         batch_size = data_src['labels'].size(0)
         # evaluate the loss
         decoder_logit = self.model(data_src, data_trg)
@@ -113,6 +116,7 @@ class Trainer(object):
         """
         A single backward step
         """
+        self.optimizer.zero_grad()
         loss.backward()
         if self.clip_norm > 0:
             grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(),
@@ -123,6 +127,14 @@ class Trainer(object):
 
         self.optimizer.step()
         # torch.cuda.empty_cache()  # FIXME
+        if self.model.version == 'conv':
+            if self.isnan_trick:
+                # forbidden: self.model.trg_embedding.label_embedding.weight = self.model.trg_embedding.label_embedding.weight.clamp(0, 20)
+                # forbidden: self.model.trg_embedding.label_embedding.weight.clamp_(0, 20)
+                #self.model.trg_embedding.label_embedding.weight.data[torch.isnan(self.model.trg_embedding.label_embedding.weight.data)] = 0
+                for p in self.model.parameters():
+                    p.data[torch.isnan(p.data)] = 0
+            self.model.trg_embedding.label_embedding.weight.data.clamp_(1e-7, 20)
         if np.isnan(loss.data.item()):
             sys.exit('Loss is nan')
         torch.cuda.synchronize()
@@ -131,6 +143,10 @@ class Trainer(object):
             self.epoch += 1
         # Log
         if (self.iteration % self.log_every == 0):
+            # print(self.model.trg_embedding.label_embedding.weight[:, :5])
+            img = self.model.trg_embedding.label_embedding.weight.data[:, :]
+            img.unsqueeze_(0)
+            self.vis.image(img)
             self.track('train/loss', loss.data.item())
             self.track('train/ml_loss', ml_loss.data.item())
             self.to_stderr(nseqs, ntokens, time.time()-start)

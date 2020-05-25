@@ -53,6 +53,26 @@ class CTCCriterion(nn.Module):
         # for param in self.parameters():
         #     param.requires_grad = False
         # self.xy_ratio = torch.nn.Parameter(torch.rand(1, requires_grad=True, device='cuda'))
+        self.max_src_length = params['max_src_length']
+        self.max_trg_length = params['max_trg_length']
+        self.src2trg_ratio = float(self.max_src_length) / float(self.max_trg_length)
+        self.src_centroid_step = round(self.src2trg_ratio)
+        self.time_certainty_decay = float(params.get('time_certainty_decay', 1.25))
+        self.trg_time_distr = torch.zeros(self.max_src_length, self.max_trg_length)
+        s = float(1) / math.sqrt(math.pi * 2.0)
+        sigma = 1.5
+        max_dens = 0.0
+        for trg_ix in range(self.max_trg_length):
+            mean = self.src2trg_ratio * trg_ix + self.src2trg_ratio / 2
+            sigma *= self.time_certainty_decay
+            ss = s / sigma
+            for src_ix in range(self.max_src_length):
+                pwr = -(((src_ix - mean)/sigma) ** 2)/2
+                dens = math.exp(pwr) * ss
+                self.trg_time_distr[src_ix, trg_ix] = dens # (1.0 - dens)*10
+                if max_dens < dens:
+                    max_dens = dens
+        self.trg_time_distr /= max_dens + 1e-7
 
     def log(self):
         self.logger.info('CTC loss')
@@ -67,7 +87,7 @@ class CTCCriterion(nn.Module):
         if xy_ratio_ == None:
             xy_ratio = 1.7 #2.5
         else:
-            xy_ratio = xy_ratio_.sigmoid()+1.0
+            xy_ratio = xy_ratio_ #xy_ratio_.sigmoid()+1.0
         #xy_ratio = 1.6
         labels = target[:, :math.floor(src_length // xy_ratio)]
         y_lengths = (labels > self.th_mask).sum(dim=1, dtype=torch.int32).cpu()
@@ -86,45 +106,64 @@ class CTCCriterion(nn.Module):
             output.data.copy_(torch.tensor(1000.0).data)
         return {"final": output, "ml": output}, {}
 
+    def scatter(self, logp, target):
+        labels = target['out_labels']
+        batch_size = logp.size(0)
+        pred_ = to_contiguous(logp).unsqueeze(2).repeat(1,1,self.max_trg_length,1)
+        gt_ix = to_contiguous(labels.long()).unsqueeze(1).repeat(1,self.max_src_length,1).unsqueeze(3).cuda()
+        pad_ix = torch.zeros_like(gt_ix).long().cuda()
+        pred = pred_.gather(3, gt_ix).squeeze(-1)
+        pads = pred_.gather(3, pad_ix).squeeze(-1)
+        weights = self.trg_time_distr.unsqueeze(0).repeat(batch_size,1,1).cuda()
+
+        pred_p = torch.sum(torch.exp(pred) * weights, dim=(1))
+        pads_p = torch.sum(torch.exp(pads) * weights, dim=(1))
+        pad2token_ratio = pads_p / (pred_p + 1e-7)
+        pad2token_variance = torch.sum((pad2token_ratio - self.src2trg_ratio + 1.0) ** 2, dim=1) / (self.max_trg_length - 1)
+        # pad2token_variance = pad2token_ratio.std(dim=1)
+        # pad2token_variance = pad2token_variance.max()
+        pad2token_variance = pad2token_variance.mean()
+        sharpen = (torch.sqrt(pad2token_variance)-1.5).clamp(min=0) ** 2
+
+        return sharpen
+
     def forward(self, logp, target):
         """
         logp : the decoder logits (N, seq_length, V)
         target : the ground truth labels (N, seq_length)
         """
-        # if isinstance(target, dict):
-        #     return self._forward_guess_len(logp, target['out_labels'], xy_ratio)
-        #batch_size = logp.size(0)
-        # src_length = logp.size(1)
-        # xy_ratio = 2.5
-        #vocab = logp.size(2)
         labels = target['out_labels']
         y_lengths = to_contiguous(target['lengths'].int()).cpu()
         x_lengths = to_contiguous(target['src_lengths'].int()).cpu()
-        x_s = x_lengths.sum().float()
-        y_s = y_lengths.sum().float()
-        xy_ratio = x_s / y_s
-        return self._forward_guess_len(logp, target['out_labels'], xy_ratio)
+
+        # x_s = x_lengths.sum().float()
+        # y_s = y_lengths.sum().float()
+        # xy_ratio = x_s / y_s
+        # return self._forward_guess_len(logp, target['out_labels'], xy_ratio)
 
         #y_lengths_ = (labels > self.th_mask).sum(dim=1, dtype=torch.int32).cpu()
         labels = to_contiguous(labels).view(-1)
-        labels = labels[(labels > self.th_mask).nonzero()].int()
-        labels = to_contiguous(labels.squeeze().cpu())
+        labels = labels[(labels > self.th_mask).nonzero()]
+        labels = to_contiguous(labels.squeeze().int().cpu())
 
         #x_lengths = torch.full((batch_size,), src_length, dtype=torch.int32, device='cpu')  # Length of inputs
 
-        logp = to_contiguous(logp.permute(1, 0, 2))
+        logp_ = to_contiguous(logp.permute(1, 0, 2))
 
-        output = self.ctc_loss(logp, labels, x_lengths, y_lengths)
+        output = self.ctc_loss(logp_, labels, x_lengths, y_lengths)
 
         # output = torch.sum(output)
         # output /= batch_size
+
 
         if torch.isinf(output).any() or torch.isnan(output).any():
             output.data.copy_(torch.tensor(1000.0).data)
             # output_ = torch.zeros([1] * 0) + 1000
             # output_.requires_grad = True
             # output_.grad_fn = output.grad_fn
-        return {"final": output, "ml": output}, {}
+        sharpen = self.scatter(logp, target)
+        output += sharpen
+        return {"final": output, "ml": sharpen}, {}
 
 class MLCriterion(nn.Module):
     """
@@ -136,6 +175,26 @@ class MLCriterion(nn.Module):
         self.th_mask = params.get('mask_threshold', 1)  # both pad and unk
         self.normalize = params.get('normalize', 'ntokens')
         self.version = 'ml'
+        self.max_src_length = params['max_src_length']
+        self.max_trg_length = params['max_trg_length']
+        self.src2trg_ratio = float(self.max_src_length) / float(self.max_trg_length)
+        self.src_centroid_step = round(self.src2trg_ratio)
+        self.time_certainty_decay = float(params.get('time_certainty_decay', 1.25))
+        self.trg_time_distr = torch.zeros(self.max_src_length, self.max_trg_length)
+        s = float(1) / math.sqrt(math.pi * 2.0)
+        sigma = 1.5
+        max_dens = 0.0
+        for trg_ix in range(self.max_trg_length):
+            mean = self.src2trg_ratio * trg_ix + self.src2trg_ratio / 2
+            sigma *= self.time_certainty_decay
+            ss = s / sigma
+            for src_ix in range(self.max_src_length):
+                pwr = -(((src_ix - mean)/sigma) ** 2)/2
+                dens = math.exp(pwr) * ss
+                self.trg_time_distr[src_ix, trg_ix] = dens # (1.0 - dens)*10
+                if max_dens < dens:
+                    max_dens = dens
+        self.trg_time_distr /= max_dens + 1e-7
 
     def log(self):
         self.logger.info('Default ML loss')
@@ -145,21 +204,53 @@ class MLCriterion(nn.Module):
         logp : the decoder logits (N, seq_length, V)
         target : the ground truth labels (N, seq_length)
         """
-        output = self.get_ml_loss(logp, target['out_labels'])
+        output = self.get_ml_loss_nocroud(logp, target)
         return {"final": output, "ml": output}, {}
+
+    def get_ml_loss_nocroud(self, logp, target):
+        labels = target['out_labels']
+        batch_size = logp.size(0)
+        #trg_length = min(logp.size(1), labels.size(1))
+        pred_ = to_contiguous(logp).unsqueeze(2).repeat(1,1,self.max_trg_length,1)
+        gt_ix = to_contiguous(labels).unsqueeze(1).repeat(1,self.max_src_length,1).unsqueeze(3)
+        pad_ix = torch.zeros_like(gt_ix)
+        pred = pred_.gather(3, gt_ix).squeeze(-1)
+        pads = pred_.gather(3, pad_ix).squeeze(-1)
+        weights = self.trg_time_distr.unsqueeze(0).repeat(batch_size,1,1).cuda()
+        pred_w = pred * weights
+
+        # pred_sel = pred.max(dim=1) # 16 x 6
+        # pred_sel = pred_sel[0]
+        # pred_sel_exp = torch.ones_like(pred_sel) - torch.exp(pred_sel)
+        # sharpen = torch.sum((pred_sel_exp) ** 2)/pred_sel.numel()
+
+        ml_output = - torch.sum(pred_w) * self.src2trg_ratio
+        ml_output /= float(pred_w.numel())
+
+        pred_p = torch.sum(torch.exp(pred) * weights, dim=(1))
+        pads_p = torch.sum(torch.exp(pads) * weights, dim=(1))
+        pad2token_ratio = pads_p / (pred_p + 1e-7)
+        pad2token_variance = torch.sum((pad2token_ratio - self.src2trg_ratio + 1.0) ** 2, dim=1) / (self.max_trg_length - 1)
+        # pad2token_variance = pad2token_ratio.std(dim=1)
+        pad2token_variance = pad2token_variance.max()
+        sharpen = (torch.sqrt(pad2token_variance)-1.5).clamp(min=0) ** 2
+
+        ml_output += sharpen
+
+        return ml_output
 
     def get_ml_loss(self, logp, target):
         """
         Compute the usual ML loss
         """
-        # print('logp:', logp.size(), "target:", target.size())
+        labels = target['out_labels']
         batch_size = logp.size(0)
-        seq_length = min(logp.size(1), target.size(1))
+        trg_length = min(logp.size(1), labels.size(1))
         #vocab = logp.size(2)
-        target_ = target[:, :seq_length]
-        logp_ = logp[:, :seq_length, :]
-        logp_ = to_contiguous(logp_).view(-1, logp_.size(2))
-        target_ = to_contiguous(target_).view(-1, 1)
+        #target_ = labels[:, :trg_length]
+        #logp_ = logp[:, :trg_length, :]
+        logp_ = to_contiguous(logp).view(-1, logp.size(2))
+        target_ = to_contiguous(labels).view(-1, 1)
         mask = target_.gt(self.th_mask)
         ml_output = - logp_.gather(1, target_)[mask]
         ml_output = torch.sum(ml_output)
@@ -171,7 +262,7 @@ class MLCriterion(nn.Module):
             # print('norm ml:', ml_output.data.item(), '// %d' % norm.data.item())
         elif self.normalize == 'seqlen':
             # print('initial ml:', ml_output.data.item())
-            norm = seq_length
+            norm = trg_length
             ml_output /= norm
             # print('norm ml:', ml_output.data.item(), '// %d' % norm)
         elif self.normalize == 'batch':

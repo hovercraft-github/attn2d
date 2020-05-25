@@ -29,9 +29,7 @@ def train(params):
 
     logger = logging.getLogger(jobname)
     # Data loading:
-    loader_params = params['data']
-    loader_params.update(params['encoder'])
-    src_loader, trg_loader = ReadData(loader_params, params['modelname'])
+    src_loader, trg_loader = ReadData({**params['data'], **params['encoder']}, params['modelname'])
     src_vocab_size = src_loader.get_vocab_size()
     trg_vocab_size = trg_loader.get_vocab_size()
     trg_specials = {'EOS': trg_loader.eos,
@@ -44,7 +42,7 @@ def train(params):
     logger.info('num. model params: %d', sum(p.data.numel()
                                              for p in model.parameters()))
 
-    criterion = ms.define_loss(jobname, params['loss'], trg_loader)
+    criterion = ms.define_loss(jobname, {**params['loss'], **params['data']}, trg_loader)
     trainer = Trainer(jobname, params, model, criterion)
     trainer.set_devices(devices)
 
@@ -63,6 +61,8 @@ def train(params):
         # update parameters: lr, ...
         if not trainer.lr_patient:
             trainer.update_params()
+        # if (trainer.iteration == 601) and (model.version == 'conv'):
+        #     model.trg_embedding.label_embedding.weight.requires_grad_(False)
         torch.cuda.synchronize()
         avg_loss = torch.zeros(1).cuda()
         avg_ml_loss = torch.zeros(1).cuda()

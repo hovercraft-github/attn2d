@@ -9,6 +9,15 @@ from .dense_modules import *
 from .transitions import Transition, Transition2
 import torch.utils.checkpoint as cp
 
+class _ClampModule(nn.Module):
+    def __init__(self):
+        super(_ClampModule, self).__init__()
+        self.dummy = nn.Parameter(torch.rand(1, requires_grad=False))
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, input):
+        #return input.clamp(0, 20)
+        return self.relu(input)
 
 class _DenseLayer(nn.Module):
     #def __init__(self, num_input_features, growth_rate, bn_size, conv_dropout, memory_efficient=False):
@@ -27,12 +36,14 @@ class _DenseLayer(nn.Module):
         self.num_input_features = num_input_features
 
         self.add_module('norm1', nn.BatchNorm2d(self.num_input_features)),
-        self.add_module('relu1', nn.ReLU(inplace=True)),
+        #self.add_module('relu1', nn.ReLU(inplace=True)),
+        self.add_module('relu1', _ClampModule())
         self.add_module('conv1', nn.Conv2d(self.num_input_features,
                                            self.bn_size * self.growth_rate, kernel_size=1, stride=1,
                                            bias=False)),
         self.add_module('norm2', nn.BatchNorm2d(self.bn_size * self.growth_rate)),
-        self.add_module('relu2', nn.ReLU(inplace=True)),
+        #self.add_module('relu2', nn.ReLU(inplace=True)),
+        self.add_module('relu2', _ClampModule())
         self.add_module('conv2', nn.Conv2d(self.bn_size * self.growth_rate, self.growth_rate,
                                            kernel_size=self.kernel_size, stride=1, padding=self.padding,
                                            bias=False)),
@@ -57,17 +68,18 @@ class _DenseLayer(nn.Module):
         def closure(*inputs):
             return self.bn_function(*inputs)
 
+        #input[0].requires_grad_(True)
         return cp.checkpoint(closure, input)
 
-    # @torch.jit._overload_method  # noqa: F811
-    # def forward(self, input):
-    #     # type: (List[Tensor]) -> (Tensor)
-    #     pass
+    @torch.jit._overload_method  # noqa: F811
+    def forward(self, input):
+        # type: (List[Tensor]) -> (Tensor)
+        pass
 
-    # @torch.jit._overload_method  # noqa: F811
-    # def forward(self, input):
-    #     # type: (Tensor) -> (Tensor)
-    #     pass
+    @torch.jit._overload_method  # noqa: F811
+    def forward(self, input):
+        # type: (Tensor) -> (Tensor)
+        pass
 
     # torchscript does not yet support *args, so we overload method
     # allowing it to take either a List[Tensor] or single Tensor
@@ -152,10 +164,12 @@ class _Transition(nn.Sequential):
     def __init__(self, num_input_features, num_output_features):
         super(_Transition, self).__init__()
         self.add_module('norm', nn.BatchNorm2d(num_input_features))
-        self.add_module('relu', nn.ReLU(inplace=True))
+        #self.add_module('relu', nn.ReLU(inplace=True))
+        self.add_module('relu', _ClampModule())
         self.add_module('conv', nn.Conv2d(num_input_features, num_output_features,
                                           kernel_size=1, stride=1, bias=False))
-        self.add_module('pool', nn.AvgPool2d(kernel_size=2, stride=2))
+        #self.add_module('pool', nn.AvgPool2d(kernel_size=2, stride=2))
+        self.add_module('pool', nn.MaxPool2d(kernel_size=2, stride=2))
 
 
 class DenseNet(nn.Module):
@@ -181,6 +195,9 @@ class DenseNet(nn.Module):
         if normalize_channels:
             self.features.add_module('initial_norm',
                                      nn.GroupNorm(1, num_features))
+        #self.features.add_module('initial_2dnorm', nn.BatchNorm2d(num_features))
+        if params.get('initial_clamp', 0) > 0:
+            self.features.add_module('initial_clamp', _ClampModule())
 
         # start by reducing the input channels
         if divide_channels > 1:
@@ -212,7 +229,8 @@ class DenseNet(nn.Module):
         self.output_channels = num_features
         # Final batch norm
         self.features.add_module('norm_last', nn.BatchNorm2d(num_features))
-        self.features.add_module('relu_last', nn.ReLU(inplace=True))
+        #self.features.add_module('relu_last', nn.ReLU(inplace=True))
+        self.features.add_module('relu_last', _ClampModule())
 
     def forward(self, x):
         return self.features(x.contiguous())

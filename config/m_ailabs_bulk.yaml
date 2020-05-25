@@ -1,0 +1,73 @@
+modelname: m_ailabs_bulk
+default_config : config/pervasive.yaml
+
+encoder:
+  type : null
+  input_dim : 20
+  input_dropout : .2
+  encode_position : 0
+  encode_length : 0
+ 
+decoder:
+  type : none
+  input_dim : 20
+  input_dropout : .2
+  encode_position : 0
+  encode_length : 0
+  tie_target_weights : 0
+  copy_source_weights : 0
+  prediction_dropout : .2
+  max_norm : 1
+  scale_grad_by_freq : 0
+  zero_pad : 1
+
+network :
+  type: densenet # efficient-densenet
+  merge_mode : product # concat product
+  growth_rate : 16
+  #num_layers : 12
+  #kernels: 7,5,7,5,7,5,7,5,7,5,7,5
+  num_layers : 8
+  kernels: 11,5,7,5,7,5,7,5
+  conv_dropout : .2
+  divide_channels : 1
+  efficient : 0
+  normalize_channels : 0
+
+aggregator:
+  aggr_dim : 2
+
+
+data:
+  src : voice
+  trg : ru
+  dir : data/m_ailabs_bulk
+  batch_size: 16
+  max_src_length : 30 #1000
+  max_trg_length : 6 #250
+
+loss:
+  version : ctc  # ctc, ml, smooth_ml
+
+track: 
+  batch_size : 4
+  checkpoint : 4000
+  max_length_a : 0
+  max_length_b : 80
+  sample_greedy : 1
+
+optim: 
+  solver : sgd # adam sgd
+  seed : 3
+  max_epochs : 400
+  weight_decay : 0 #1e-4 #1e-1
+  grad_clip : 10 #1
+  isnan_trick : null
+  LR:
+      base : 0.0005
+      decay_start : 0
+      decay_every: 40
+      decay_rate : 0.95
+      patience : 3
+      schedule: early-stopping
+      criterion : loss

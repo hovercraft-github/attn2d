@@ -268,14 +268,23 @@ class Pervasive(nn.Module):
     # @profile
     def forward(self, data_src, data_trg):
         src_emb = self.src_embedding(data_src)
-        #trg_emb = self.trg_embedding(data_trg)
-        trg_emb = self.trg2alphabet(data_src, data_trg)
+        # trg_emb = self.trg2alphabet(data_src, data_trg)
         Ts = src_emb.size(1)  # source sequence length
-        #Tt = trg_emb.size(1)  # target sequence length
-        Tt = trg_emb.size(2)  # target sequence length
+        if "masks_train" in data_trg:
+            trg_emb = data_trg["masks_train"][:,:Ts]
+        else:
+            batch_size = data_src["labels"].size(0)
+            alphabet_size = self.trg_vocab_size
+            alphabet = torch.arange(alphabet_size, device='cuda').unsqueeze(0).repeat(batch_size,1)
+            trg_emb = alphabet.unsqueeze(1).repeat(1, Ts, 1)
+            # trg_emb = _expand(trg_emb.unsqueeze(2), 2, Ts)
+        trg_emb = torch.clamp(input=self.trg_embedding(trg_emb), min=0, max=20)
+        if torch.isinf(trg_emb).any() or torch.isnan(trg_emb).any():
+            emb_w = self.trg_embedding.label_embedding.weight[:, :5]
+            print(emb_w)
+        Tt = trg_emb.size(2)  # target sequence length == alphabet size
         # 2d grid:
         src_emb = _expand(src_emb.unsqueeze(1), 1, Tt)
-        #trg_emb = _expand(trg_emb.unsqueeze(2), 2, Ts)
         trg_emb = trg_emb.permute(0, 2, 1, 3)
         X = self.merge(src_emb, trg_emb)
         # del src_emb, trg_emb
@@ -287,13 +296,17 @@ class Pervasive(nn.Module):
         #     logits = F.log_softmax(
         #         self.prediction(X), dim=2)
         logits = F.log_softmax(Y, dim=2)
+        if torch.isinf(logits).any() or torch.isnan(logits).any():
+            print("Hello, World!")
         return logits
 
     # @profile
     def _forward(self, X, src_lengths=None, track=False):
-        X = X.permute(0, 3, 1, 2)
-        X = self.net(X)
-        Y = self.prediction(X).squeeze(1).transpose(2,1)
+        X = X.permute(0, 3, 1, 2) #.requires_grad_(True)
+        Y = self.net(X)
+        if torch.isinf(Y).any() or torch.isnan(Y).any():
+            print("Hello, World!")
+        Y = self.prediction(Y).squeeze(1).transpose(2,1)
         return Y
         # if track:
         #     X, attn = self.aggregator(X, src_lengths, track=True)
