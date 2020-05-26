@@ -52,7 +52,9 @@ def train(params):
     trg_loader.iterators = iters.get('trg_iterators', trg_loader.iterators)
 
     pass_no = 0
-
+    eval_after_restore = False
+    if trainer.iteration > 200:
+        eval_after_restore = True
     # logger.warning("xy_ratio=%f", model.xy_ratio_ctc.sigmoid().squeeze()+1.0)
 
     if trainer.lr_patient:
@@ -120,6 +122,9 @@ def train(params):
         # Evaluate on validation set then save
         if trainer.evaluate:
             trainer.validate(src_loader, trg_loader)
+        elif eval_after_restore:
+            eval_after_restore = False
+            trainer.validate(src_loader, trg_loader, eval_only=True)
         if trainer.done:
             logger.info('Max epochs reached!')
             break

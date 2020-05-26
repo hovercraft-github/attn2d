@@ -155,7 +155,7 @@ class Trainer(object):
         self.evaluate = (self.iteration % self.checkpoint == 0)
         self.done = (self.epoch > self.params['optim']['max_epochs'])
 
-    def validate(self, src_loader=None, trg_loader=None):
+    def validate(self, src_loader=None, trg_loader=None, eval_only=False):
         """
         Evaluate on the dev set
         """
@@ -182,6 +182,10 @@ class Trainer(object):
                                                       params['track'])
             save_every = 1
             save_best = 0
+
+        if eval_only:
+            self.model.train()
+            return
 
         self.track('val/loss', val_loss)
         self.track('val/ml_loss', val_ml_loss)

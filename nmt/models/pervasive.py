@@ -524,13 +524,18 @@ class Pervasive(nn.Module):
         batch_size = data_src['labels'].size(0)
         src_emb = self.src_embedding(data_src)
         Ts = src_emb.size(1)  # source sequence length
-        trg_labels = torch.arange(self.trg_vocab_size, device='cuda').unsqueeze(0).repeat(batch_size, 1)
-        trg_emb = self.trg_embedding(trg_labels)
-        Ts = src_emb.size(1)  # source sequence length
-        Tt = trg_emb.size(1)  # target sequence length
+        alphabet = torch.arange(self.trg_vocab_size, device='cuda')
+        alphabet[alphabet >= 43] = 1
+        alphabet = alphabet.unsqueeze(0).repeat(batch_size, 1)
+        trg_emb = alphabet.unsqueeze(1).repeat(1, Ts, 1)
+        # trg_emb = self.trg_embedding(alphabet)
+        trg_emb = torch.clamp(input=self.trg_embedding(trg_emb), min=0, max=20)
+        Tt = trg_emb.size(2)  # target sequence length
         # 2d grid:
         src_emb = _expand(src_emb.unsqueeze(1), 1, Tt)
-        trg_emb = _expand(trg_emb.unsqueeze(2), 2, Ts)
+        # trg_emb = _expand(trg_emb.unsqueeze(2), 2, Ts)
+        trg_emb = trg_emb.permute(0, 2, 1, 3)
+
         X = self.merge(src_emb, trg_emb)
         Y = self._forward(X, data_src['lengths'])
         logits = F.log_softmax(Y, dim=2)
